@@ -74,21 +74,31 @@ public static class SystemInfo
         try
         {
             using var root = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\" + capability);
-            return root != null && Scan(root);
+            return root != null && Scan(root, desktop: false);
         }
         catch { return false; }
 
-        static bool Scan(RegistryKey key)
+        static bool Scan(RegistryKey key, bool desktop)
         {
             foreach (var name in key.GetSubKeyNames())
             {
                 using var sub = key.OpenSubKey(name);
                 if (sub == null) continue;
-                if (name == "NonPackaged") { if (Scan(sub)) return true; continue; }
-                if (sub.GetValue("LastUsedTimeStop") is long stop && stop == 0 && sub.GetValue("LastUsedTimeStart") is long start && start > 0)
+                if (name == "NonPackaged") { if (Scan(sub, desktop: true)) return true; continue; }
+                if (sub.GetValue("LastUsedTimeStop") is long stop && stop == 0 && sub.GetValue("LastUsedTimeStart") is long start && start > 0
+                    && (!desktop || Running(name)))
                     return true;
             }
             return false;
+        }
+
+        // a desktop app that quits or crashes mid-call never writes its stop time, so its entry reads "in use"
+        // forever: trust it only while that exe is still running (key names are exe paths with '#' for '\')
+        static bool Running(string key)
+        {
+            var ps = System.Diagnostics.Process.GetProcessesByName(Path.GetFileNameWithoutExtension(key.Replace('#', '\\')));
+            foreach (var p in ps) p.Dispose();
+            return ps.Length > 0;
         }
     }
 
