@@ -35,7 +35,8 @@ public static class SystemInfo
     public static double DownBps { get; private set; }
     public static double UpBps { get; private set; }
 
-    public static void SampleStats()
+    /// net=false skips the adapter enumeration, which allocates far more than the CPU/RAM counters
+    public static void SampleStats(bool net = true)
     {
         if (Native.GetSystemTimes(out var idle, out var kernel, out var user))
         {
@@ -46,6 +47,7 @@ public static class SystemInfo
         var m = new Native.MEMORYSTATUSEX { dwLength = (uint)System.Runtime.InteropServices.Marshal.SizeOf<Native.MEMORYSTATUSEX>() };
         if (Native.GlobalMemoryStatusEx(ref m)) Ram = m.dwMemoryLoad;
 
+        if (!net) return;
         try
         {
             long rx = 0, tx = 0;

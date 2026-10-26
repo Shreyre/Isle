@@ -69,6 +69,7 @@ public partial class MainWindow : Window
     readonly RectangleGeometry _clip = new();
     double _compactW = 120, _compactH = 34, _popupW = 300, _popupH = 34;
     bool _hoverBump; // compact island swells slightly under the pointer
+    double _near;    // 0..1 how close the pointer is to the island: idle widgets react to it
     bool _peek; Rect _peekRect; // Ctrl see-through: ghosted and click-through until the pointer leaves _peekRect
 
     // timed micro-animations, advanced by the render loop until _animUntil
@@ -420,6 +421,7 @@ public partial class MainWindow : Window
         var tabs = EnabledTabs;
         if (MediaLive && tabs.Contains(Page.Media)) return Page.Media;
         if (TimerLive && tabs.Contains(Page.Timer)) return Page.Timer;
+        if (S.IdleWidgetMode == "NextTask" && tabs.Contains(Page.Tasks)) return Page.Tasks; // the capsule was showing a task
         if (tabs.Contains(Page.Home)) return Page.Home; // nothing live: the start page, not an empty "Not Playing"
         int i = Math.Clamp(S.LastActiveTab, 0, TabOrder.Length - 1);
         return tabs.Contains(TabOrder[i]) ? TabOrder[i] : tabs[0];
@@ -796,7 +798,8 @@ public partial class MainWindow : Window
             if (!_fullscreen && !_menuOpen) Native.SetWindowPos(_hwnd, Native.HWND_TOPMOST, 0, 0, 0, 0, Native.SWP_NOMOVE | Native.SWP_NOSIZE | Native.SWP_NOACTIVATE);
             if (S.EnablePrivacyIndicator) _privacy = SystemInfo.PrivacyInUse(); else _privacy = default;
         }
-        if (_ticks % 45 == 0 && S.IdleWidgetMode == "SystemStats") SystemInfo.SampleStats();
+        if (_ticks % 45 == 0 && S.IdleWidgetMode is "SystemStats" or "ActivityRings" or "Network")
+            SystemInfo.SampleStats(net: S.IdleWidgetMode == "Network" || (S.IdleWidgetMode == "SystemStats" && S.ShowNetworkSpeed));
         if (_ticks % 90 == 0) CheckBattery();
         if (S.IdleWidgetMode == "Weather" && now - _weatherAt > TimeSpan.FromMinutes(20))
         {
@@ -948,17 +951,24 @@ public partial class MainWindow : Window
         CPrivacy.Margin = v ? new Thickness(0, 6, 0, 0) : new Thickness(6, 0, 0, 0);
     }
 
-    string _lastClockText;
     ImageSource _cartFor;
 
     void UpdateCompact(DateTime now, double dt, Point cursor)
     {
-        UIElement[] all = { CArt, CLeadIcon, CBatt, CText, CDots, CBold, CEyes, CDot, CGap, CWave, CTrailText, CRing };
+        UIElement[] all = { CArt, CLeadIcon, CBatt, CAnalog, CRings, CCal, CText, CDots, CBold, CEyes, CDot, COrb, CGap, CWave, CTrailText, CRing };
         var on = new HashSet<UIElement>();
         double h = 34;
         bool side = IsSide;
         var m = _media.Current;
         _bubbleOn = false;
+
+        // pointer magnetism: within ~160 DIP of the island the content leans a few pixels towards the cursor
+        Vector d = cursor - new Point(_islandRect.X + _islandRect.Width / 2, _islandRect.Y + _islandRect.Height / 2);
+        double ex = Math.Max(0, Math.Abs(d.X) - _islandRect.Width / 2), ey = Math.Max(0, Math.Abs(d.Y) - _islandRect.Height / 2);
+        _near = Ui.Ease(_near, Math.Clamp(1 - Math.Sqrt(ex * ex + ey * ey) / 160, 0, 1), 10, dt);
+        double lx = side ? 1.5 : 4, ly = side ? 4 : 1.5;
+        CompactShift.X = Ui.Ease(CompactShift.X, Math.Clamp(d.X / (_islandRect.Width / 2 + 30), -1, 1) * lx * _near, 14, dt);
+        CompactShift.Y = Ui.Ease(CompactShift.Y, Math.Clamp(d.Y / (_islandRect.Height / 2 + 30), -1, 1) * ly * _near, 14, dt);
 
         void Lead(string glyph, Color c, string font = null)
         {
@@ -976,7 +986,6 @@ public partial class MainWindow : Window
         }
         else if (MediaLive)
         {
-            _lastClockText = null;
             if (_cartFor != m.Art || CArt.Background == null)
             {
                 _cartFor = m.Art;
@@ -1058,10 +1067,55 @@ public partial class MainWindow : Window
         bool side = IsSide;
         string time = S.Use12HourClock ? now.ToString("h:mm") : now.ToString("HH:mm");
         string mode = S.IdleWidgetMode;
-        if (side && mode is "Clock" or "TrackInfo" or "SystemStats" or "Weather") mode = "SideClock";
+        if (side && mode is "Clock" or "TrackInfo" or "SystemStats" or "Weather" or "Network" or "NextTask") mode = "SideClock";
+        if (side && mode == "Orb") mode = "MinimalDot"; // the orb's track runs along a horizontal capsule
 
         switch (mode)
         {
+            case "AnalogClock":
+                CAnalog.Time = now;
+                on.Add(CAnalog);
+                if (!side) { CText.Text = now.ToString("ddd d"); CText.Foreground = Brushes.White; CText.MaxWidth = 200; on.Add(CText); }
+                break;
+            case "Calendar":
+                CCalDay.Text = now.ToString("ddd").ToUpperInvariant();
+                CCalNum.Text = now.Day.ToString();
+                on.Add(CCal);
+                if (!side) { CText.Text = S.Use12HourClock ? now.ToString("h:mm tt") : time; CText.Foreground = Brushes.White; CText.MaxWidth = 200; on.Add(CText); }
+                break;
+            case "ActivityRings":
+                // ease towards each 1.5 s sample so the rings fill like Apple's instead of jumping; redraw only while moving
+                void Fill(Ring ring, double v)
+                {
+                    double nv = Ui.Ease(ring.Value, v, 5, dt);
+                    if (Math.Abs(nv - ring.Value) > 1e-3) { ring.Value = nv; ring.InvalidateVisual(); }
+                }
+                Fill(CRingCpu, SystemInfo.Cpu / 100);
+                Fill(CRingRam, SystemInfo.Ram / 100);
+                on.Add(CRings);
+                if (side) break;
+                Runs(on, ("CPU ", Secondary), ($"{SystemInfo.Cpu:0}%", CRingCpu.Color), ("   RAM ", Secondary), ($"{SystemInfo.Ram:0}%", CRingRam.Color));
+                CText.MaxWidth = 300;
+                break;
+            case "Network":
+                Runs(on, ("↓ ", Blue), (SystemInfo.FormatRate(SystemInfo.DownBps), Colors.White), ("    ↑ ", Orange), (SystemInfo.FormatRate(SystemInfo.UpBps), Colors.White));
+                CText.MaxWidth = 300;
+                break;
+            case "NextTask":
+                var next = S.Tasks.FirstOrDefault(t => !t.Done);
+                int open = S.Tasks.Count(t => !t.Done);
+                lead(next != null ? TabGlyph[Array.IndexOf(TabOrder, Page.Tasks)] : "", next != null ? Accent : Green, null);
+                CText.Text = next?.Text ?? "All caught up";
+                CText.Foreground = next != null ? Brushes.White : Ui.Brush(Secondary);
+                CText.MaxWidth = 240;
+                on.Add(CText);
+                if (open > 1) trail($"+{open - 1}", Secondary);
+                break;
+            case "Orb":
+                COrb.Accent = Accent;
+                COrb.Tick(Root.TranslatePoint(cursor, COrb).X / Math.Max(1, COrb.ActualWidth), _near, dt);
+                on.Add(COrb);
+                break;
             case "Battery":
                 var b = _battery;
                 if (b.HasBattery)
@@ -1089,14 +1143,17 @@ public partial class MainWindow : Window
             case "MinimalDot":
                 CDot.Fill = Ui.Brush(Accent);
                 CDot.Opacity = 0.55 + 0.45 * Math.Sin(now.TimeOfDay.TotalSeconds * 2.2);
+                CDotScale.ScaleX = CDotScale.ScaleY = 1 + 0.7 * _near; // swells as the pointer approaches
                 on.Add(CDot);
                 break;
             case "AnimatedEyes":
             case "WhiteEyeballs":
                 CEyes.WhiteStyle = mode == "WhiteEyeballs";
                 CEyes.Accent = Accent;
-                var ctr = new Point(_islandRect.X + _islandRect.Width / 2, _islandRect.Y + _islandRect.Height / 2);
-                CEyes.Look(new Vector((cursor.X - ctr.X) / 300, (cursor.Y - ctr.Y) / 200));
+                // aim from the eyes themselves, saturating softly: small moves near the island still register,
+                // a cursor across the screen doesn't pin them to the corner
+                var e = Root.TranslatePoint(cursor, CEyes) - new Point(CEyes.ActualWidth / 2, CEyes.ActualHeight / 2);
+                CEyes.Look(new Vector(e.X / (Math.Abs(e.X) + 40), e.Y / (Math.Abs(e.Y) + 24)), _near);
                 CEyes.Tick(dt);
                 on.Add(CEyes);
                 break;
@@ -1134,25 +1191,35 @@ public partial class MainWindow : Window
                     case "DotMatrix":
                         CDots.Text = time;
                         CDots.Color = Colors.White;
+                        CDots.Pointer = _near > 0.02 ? Root.TranslatePoint(cursor, CDots) : null; // LEDs glow under the approaching pointer
                         on.Add(CDots);
                         break;
                     default:
-                        string txt = $"{now:ddd d MMM}|{(S.Use12HourClock ? now.ToString("h:mm tt") : time)}";
-                        if (txt != _lastClockText)
-                        {
-                            _lastClockText = txt;
-                            var parts = txt.Split('|');
-                            CText.Inlines.Clear();
-                            CText.Inlines.Add(new System.Windows.Documents.Run(parts[0]) { Foreground = Ui.Brush(Secondary) });
-                            CText.Inlines.Add(new System.Windows.Documents.Run("   " + parts[1]) { Foreground = Brushes.White });
-                        }
+                        Runs(on, (now.ToString("ddd d MMM"), Secondary), ("   " + (S.Use12HourClock ? now.ToString("h:mm tt") : time), Colors.White));
                         CText.MaxWidth = 300;
-                        on.Add(CText);
-                        return;
+                        break;
                 }
                 break;
         }
-        _lastClockText = null;
+    }
+
+    /// Multi-colour single line in CText. The runs already there are compared in place (allocation-free, every tick)
+    /// and rebuilt only when their text changed or another mode overwrote CText.Text; each mode's colours are fixed.
+    void Runs(HashSet<UIElement> on, params (string text, Color color)[] runs)
+    {
+        var il = CText.Inlines.FirstInline;
+        bool same = true;
+        foreach (var (text, _) in runs)
+        {
+            if (il is not System.Windows.Documents.Run r || r.Text != text) { same = false; break; }
+            il = il.NextInline;
+        }
+        if (!same || il != null)
+        {
+            CText.Inlines.Clear();
+            foreach (var (text, color) in runs) CText.Inlines.Add(new System.Windows.Documents.Run(text) { Foreground = Ui.Brush(color) });
+        }
+        on.Add(CText);
     }
 
     // =====================================================================================

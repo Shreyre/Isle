@@ -293,7 +293,9 @@ public sealed class SettingsWindow : Window
         // Widgets & Apps
         Pick("Widgets", "Idle Capsule", "Idle Capsule Widget Display", "Choose what information is displayed inside the compact pill when idle.",
             new[] { ("Live Clock & Date", "Clock"), ("Battery & Power Status", "Battery"), ("Current Track Info", "TrackInfo"), ("System Stats (CPU / RAM)", "SystemStats"),
-                    ("Minimal Activity Dot", "MinimalDot"), ("Animated Island Eyes", "AnimatedEyes"), ("Solid White Eyeballs", "WhiteEyeballs"), ("Weather", "Weather") },
+                    ("Minimal Activity Dot", "MinimalDot"), ("Animated Island Eyes", "AnimatedEyes"), ("Solid White Eyeballs", "WhiteEyeballs"), ("Weather", "Weather"),
+                    ("Analog Clock", "AnalogClock"), ("Calendar Date & Time", "Calendar"), ("Activity Rings (CPU / RAM)", "ActivityRings"),
+                    ("Network Speed", "Network"), ("Next Task", "NextTask"), ("Glow Orb (follows cursor)", "Orb") },
             () => S.IdleWidgetMode, v => S.IdleWidgetMode = v);
         Seg("Widgets", "Idle Capsule", "Clock Time Format", "Toggle between 12-Hour format (with AM/PM) and 24-Hour military time.",
             new[] { "12-Hour", "24-Hour" }, new[] { "12", "24" }, () => S.Use12HourClock ? "12" : "24", v => S.Use12HourClock = v == "12");

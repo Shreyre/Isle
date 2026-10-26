@@ -65,7 +65,8 @@ public sealed class AppSettings
     public bool EnableMusicRadar { get; set; } = true;
 
     // Widgets
-    public string IdleWidgetMode { get; set; } = "Clock";      // Clock, Battery, TrackInfo, SystemStats, MinimalDot, AnimatedEyes, WhiteEyeballs, Weather
+    public string IdleWidgetMode { get; set; } = "Clock";      // Clock, Battery, TrackInfo, SystemStats, MinimalDot, AnimatedEyes, WhiteEyeballs, Weather,
+                                                               // AnalogClock, Calendar, ActivityRings, Network, NextTask, Orb
     public bool Use12HourClock { get; set; } = true;
     public string IdleClockStyle { get; set; } = "Classic";    // Classic, Bold, DotMatrix
     public string DropTargetFolderPath { get; set; } = "";

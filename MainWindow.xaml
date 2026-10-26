@@ -280,6 +280,8 @@
             <Grid x:Name="CompactView" HorizontalAlignment="Center" VerticalAlignment="Center" RenderTransformOrigin="0.5,0.5">
                 <Grid.RenderTransform><ScaleTransform x:Name="CompactScale"/></Grid.RenderTransform>
                 <Grid x:Name="CompactGrid" Margin="12,0">
+                    <!-- leans towards the approaching pointer (iPadOS pointer magnetism) -->
+                    <Grid.RenderTransform><TranslateTransform x:Name="CompactShift"/></Grid.RenderTransform>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="Auto"/>
@@ -297,6 +299,17 @@
                         <Border x:Name="CArt" Width="22" Height="22" CornerRadius="6" Visibility="Collapsed"/>
                         <TextBlock x:Name="CLeadIcon" FontFamily="{StaticResource Icons}" FontSize="15" VerticalAlignment="Center" Visibility="Collapsed"/>
                         <c:BatteryGlyph x:Name="CBatt" Visibility="Collapsed" VerticalAlignment="Center"/>
+                        <c:AnalogClock x:Name="CAnalog" Width="22" Height="22" Visibility="Collapsed"/>
+                        <!-- Apple Watch Activity-style rings: CPU outside, RAM inside -->
+                        <Grid x:Name="CRings" Width="24" Height="24" Visibility="Collapsed">
+                            <c:Ring x:Name="CRingCpu" Thickness="3.5" Color="#FA114F"/>
+                            <c:Ring x:Name="CRingRam" Margin="5" Thickness="3.5" Color="#92E82A"/>
+                        </Grid>
+                        <!-- iOS Calendar-style date: red weekday over the day number -->
+                        <StackPanel x:Name="CCal" VerticalAlignment="Center" Visibility="Collapsed">
+                            <TextBlock x:Name="CCalDay" FontSize="8.5" FontWeight="Bold" Foreground="{StaticResource Red}" HorizontalAlignment="Center" LineHeight="9" LineStackingStrategy="BlockLineHeight"/>
+                            <TextBlock x:Name="CCalNum" FontSize="16" FontWeight="SemiBold" FontFamily="SF Pro Display, ./Assets/Fonts/#Inter Display, ./Assets/Fonts/#Inter" HorizontalAlignment="Center" LineHeight="17" LineStackingStrategy="BlockLineHeight"/>
+                        </StackPanel>
                     </Grid>
 
                     <Grid x:Name="CCenter" Grid.Column="1" VerticalAlignment="Center" HorizontalAlignment="Center" Margin="8,0">
@@ -307,7 +320,10 @@
                             <TextBlock x:Name="CBoldBottom" FontSize="24" FontWeight="Bold" FontFamily="SF Pro Display, ./Assets/Fonts/#Inter Display, ./Assets/Fonts/#Inter" HorizontalAlignment="Center" LineHeight="23" LineStackingStrategy="BlockLineHeight"/>
                         </StackPanel>
                         <c:EyesControl x:Name="CEyes" Width="64" Height="20" Visibility="Collapsed"/>
-                        <Ellipse x:Name="CDot" Width="8" Height="8" Visibility="Collapsed"/>
+                        <Ellipse x:Name="CDot" Width="8" Height="8" Visibility="Collapsed" RenderTransformOrigin="0.5,0.5">
+                            <Ellipse.RenderTransform><ScaleTransform x:Name="CDotScale"/></Ellipse.RenderTransform>
+                        </Ellipse>
+                        <c:Orb x:Name="COrb" Width="96" Height="22" Visibility="Collapsed"/>
                         <Border x:Name="CGap" Width="96" Height="1" Visibility="Collapsed"/>
                     </Grid>
 

@@ -197,6 +197,11 @@ public sealed class DotMatrixText : FrameworkElement
     public string Text { get => _text; set { if (_text == value) return; _text = value ?? ""; InvalidateMeasure(); InvalidateVisual(); } }
     public double Dot { get; set; } = 2.4;
     public Color Color { get; set; } = Colors.White;
+    /// Cursor in local coordinates while it is close (null = far): unlit LEDs around it glow.
+    Point? _pointer;
+    public Point? Pointer { get => _pointer; set { if (_pointer == value) return; _pointer = value; InvalidateVisual(); } }
+    Brush[] _glow;
+    Color _glowFor;
 
     double Pitch => Dot * 1.45;
     int Columns => _text.Sum(c => (Glyphs.TryGetValue(c, out var g) ? g[0].Length : 2) + 1) - 1;
@@ -206,7 +211,11 @@ public sealed class DotMatrixText : FrameworkElement
     protected override void OnRender(DrawingContext dc)
     {
         var on = Ui.Brush(Color);
-        var off = Ui.Brush(Color, 0.10);
+        if (_glow == null || _glowFor != Color) // unlit LED brightness steps, 10% .. 55%
+        {
+            _glowFor = Color;
+            _glow = Enumerable.Range(0, 8).Select(i => (Brush)Ui.Brush(Color, 0.10 + 0.45 * i / 7)).ToArray();
+        }
         double x = 0, r = Dot / 2;
         foreach (char ch in _text)
         {
@@ -214,9 +223,85 @@ public sealed class DotMatrixText : FrameworkElement
             int cols = g[0].Length;
             for (int row = 0; row < 7; row++)
                 for (int col = 0; col < cols; col++)
-                    dc.DrawEllipse(g[row][col] == '1' ? on : off, null, new Point(x + col * Pitch + r, row * Pitch + r), r, r);
+                {
+                    var c = new Point(x + col * Pitch + r, row * Pitch + r);
+                    double lit = _pointer is { } p ? Math.Clamp(1 - (c - p).Length / 26, 0, 1) : 0;
+                    dc.DrawEllipse(g[row][col] == '1' ? on : _glow[(int)Math.Round(lit * 7)], null, c, r, r);
+                }
             x += (cols + 1) * Pitch;
         }
+    }
+}
+
+/// Apple Clock-icon face: white dial, black hands and a sweeping orange second hand.
+public sealed class AnalogClock : FrameworkElement
+{
+    static readonly Pen Hour = Hand(Colors.Black, 2), Minute = Hand(Colors.Black, 1.4),
+        Second = Hand(Color.FromRgb(0xFF, 0x9F, 0x0A), 0.8), Tick = Hand(Color.FromRgb(0x8E, 0x8E, 0x93), 0.7);
+    static Pen Hand(Color c, double w) { var p = new Pen(Ui.Brush(c), w) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round }; p.Freeze(); return p; }
+
+    DateTime _time;
+    public DateTime Time { get => _time; set { _time = value; InvalidateVisual(); } }
+
+    protected override void OnRender(DrawingContext dc)
+    {
+        double r = Math.Min(ActualWidth, ActualHeight) / 2;
+        if (r <= 0) return;
+        var c = new Point(ActualWidth / 2, ActualHeight / 2);
+        Point At(double turns, double len) => new(c.X + len * r * Math.Sin(turns * 2 * Math.PI), c.Y - len * r * Math.Cos(turns * 2 * Math.PI));
+        dc.DrawEllipse(Brushes.White, null, c, r, r);
+        for (int i = 0; i < 12; i++) dc.DrawLine(Tick, At(i / 12.0, 0.8), At(i / 12.0, 0.92));
+        var t = _time.TimeOfDay;
+        dc.DrawLine(Hour, c, At(t.TotalHours % 12 / 12, 0.5));
+        dc.DrawLine(Minute, c, At(t.TotalMinutes % 60 / 60, 0.78));
+        dc.DrawLine(Second, c, At(t.TotalSeconds % 60 / 60, 0.84));
+        dc.DrawEllipse(Second.Brush, null, c, 1.4, 1.4);
+    }
+}
+
+/// Siri-style glow that drifts along the capsule, chases the cursor as it comes near and stretches as it moves.
+public sealed class Orb : FrameworkElement
+{
+    public Color Accent { get; set; } = Color.FromRgb(0x70, 0xE0, 0xC0);
+    double _x = 0.5, _v, _clock, _near;
+    Brush _halo, _core;
+    Color _brushFor;
+
+    /// target: cursor position across the orb's track (0..1); near: 0..1 how close the cursor is to the island.
+    public void Tick(double target, double near, double dt)
+    {
+        _clock += dt;
+        _near = Ui.Ease(_near, near, 8, dt);
+        double wander = 0.5 + 0.35 * Math.Sin(_clock * 0.6) * Math.Sin(_clock * 0.23 + 1);
+        double goal = wander + (Math.Clamp(target, 0, 1) - wander) * _near;
+        double prev = _x;
+        _x = Ui.Ease(_x, goal, 7, dt);
+        _v = Ui.Ease(_v, (_x - prev) / dt, 12, dt);
+        InvalidateVisual();
+    }
+
+    protected override void OnRender(DrawingContext dc)
+    {
+        double w = ActualWidth, h = ActualHeight;
+        if (w <= 0 || h <= 0) return;
+        if (_halo == null || _brushFor != Accent)
+        {
+            _brushFor = Accent;
+            var a = Accent;
+            _halo = new RadialGradientBrush(Color.FromArgb(110, a.R, a.G, a.B), Color.FromArgb(0, a.R, a.G, a.B));
+            _core = new RadialGradientBrush(new GradientStopCollection
+            {
+                new(Colors.White, 0), new(a, 0.55), new(Color.FromRgb((byte)(a.R * 0.6), (byte)(a.G * 0.6), (byte)(a.B * 0.6)), 1),
+            }) { GradientOrigin = new Point(0.35, 0.3) };
+            _halo.Freeze(); _core.Freeze();
+        }
+        double r = h / 2 * (0.6 + 0.08 * Math.Sin(_clock * 2.4) + 0.25 * _near); // breathes, swells as the cursor nears
+        var c = new Point(h / 2 + (w - h) * _x, h / 2);
+        double s = Math.Min(0.7, Math.Abs(_v) * 0.6); // squash & stretch with speed
+        dc.PushTransform(new ScaleTransform(1 + s, 1 - s * 0.35, c.X, c.Y));
+        dc.DrawEllipse(_halo, null, c, r * 1.9, r * 1.9);
+        dc.DrawEllipse(_core, null, c, r, r);
+        dc.Pop();
     }
 }
 
@@ -226,17 +311,22 @@ public sealed class EyesControl : FrameworkElement
     public bool WhiteStyle { get; set; }
     public Color Accent { get; set; } = Color.FromRgb(0x70, 0xE0, 0xC0);
     Vector _look, _lookTarget;
-    double _blink = 1, _nextBlink = 2, _clock, _happy;
+    double _blink = 1, _nextBlink = 2, _clock, _happy, _near, _nearTarget;
     static readonly Random Rnd = new();
 
-    /// dir components in -1..1
-    public void Look(Vector dir) => _lookTarget = new Vector(Math.Clamp(dir.X, -1, 1), Math.Clamp(dir.Y, -1, 1));
+    /// dir components in -1..1; near 0..1 = how close the cursor is (the eyes widen and the pupils dilate)
+    public void Look(Vector dir, double near = 0)
+    {
+        _lookTarget = new Vector(Math.Clamp(dir.X, -1, 1), Math.Clamp(dir.Y, -1, 1));
+        _nearTarget = Math.Clamp(near, 0, 1);
+    }
     public void Happy() => _happy = 1.6;
 
     public void Tick(double dt)
     {
         _clock += dt;
-        _look = new Vector(Ui.Ease(_look.X, _lookTarget.X, 9, dt), Ui.Ease(_look.Y, _lookTarget.Y, 9, dt));
+        _look = new Vector(Ui.Ease(_look.X, _lookTarget.X, 16, dt), Ui.Ease(_look.Y, _lookTarget.Y, 16, dt));
+        _near = Ui.Ease(_near, _nearTarget, 8, dt);
         _happy = Math.Max(0, _happy - dt);
         _nextBlink -= dt;
         if (_nextBlink <= 0) { _blink = 0; _nextBlink = 2.5 + Rnd.NextDouble() * 4; }
@@ -249,7 +339,7 @@ public sealed class EyesControl : FrameworkElement
         double w = ActualWidth, h = ActualHeight;
         if (w <= 0) return;
         double open = _blink < 1 ? Math.Max(0.08, 1 - Math.Sin(_blink * Math.PI)) : 1; // dips to closed mid-blink
-        double eyeW = WhiteStyle ? h * 0.78 : h * 0.42, eyeH = h * 0.78;
+        double eyeW = WhiteStyle ? h * 0.78 : h * 0.42, eyeH = h * (0.78 + 0.16 * _near);
         double gap = WhiteStyle ? h * 0.28 : h * 0.5;
         double cx = w / 2, cy = h / 2;
         for (int s = -1; s <= 1; s += 2)
@@ -261,7 +351,7 @@ public sealed class EyesControl : FrameworkElement
                 dc.DrawEllipse(Brushes.White, null, new Point(ex, cy), rx, Math.Max(1, ry));
                 if (open > 0.3)
                 {
-                    double pr = eyeW * 0.24;
+                    double pr = eyeW * (0.24 + 0.07 * _near);
                     var pc = new Point(ex + _look.X * (rx - pr - 1), cy + _look.Y * (ry - pr - 1));
                     dc.DrawEllipse(Brushes.Black, null, pc, pr, Math.Min(pr, ry * 0.8));
                     dc.DrawEllipse(Brushes.White, null, new Point(pc.X + pr * 0.35, pc.Y - pr * 0.35), pr * 0.25, pr * 0.25);
