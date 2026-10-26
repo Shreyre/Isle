@@ -69,6 +69,7 @@ public partial class MainWindow : Window
     readonly RectangleGeometry _clip = new();
     double _compactW = 120, _compactH = 34, _popupW = 300, _popupH = 34;
     bool _hoverBump; // compact island swells slightly under the pointer
+    bool _peek; Rect _peekRect; // Ctrl see-through: ghosted and click-through until the pointer leaves _peekRect
 
     // timed micro-animations, advanced by the render loop until _animUntil
     DateTime _animUntil, _popupInAt, _popupTrailAt, _pageInAt, _trackInAt, _playPopAt;
@@ -144,7 +145,7 @@ public partial class MainWindow : Window
         ("", "Clipboard Shelf", "Everything you copy is kept: search it, filter by type, pin favourites, drag clips out, extract text from images or look them up with Google Lens."),
         ("", "Timers, Stopwatch & Focus", "Start a countdown from a preset, run a stopwatch with laps, or stay in flow with Pomodoro focus rounds — all as live activities."),
         ("", "Apps, Folders & Drops", "Pin apps and folders for one-click launching, and drop files on the island to save them to a folder or the clipboard shelf."),
-        ("", "Magic Shake & Docking", "Shake the cursor to summon the island, press Alt+H to hide it, and dock it to any edge or corner in Settings."),
+        ("", "Magic Shake & Docking", "Shake the cursor to summon the island, press Alt+H to hide it, tap Ctrl over it to see and click what's behind, and dock it to any edge or corner in Settings."),
     };
 
     DispatcherTimer _notesSave;
@@ -554,7 +555,8 @@ public partial class MainWindow : Window
         _opExpanded = Fade(_opExpanded, showE, dt);
         _opPopup = Fade(_opPopup, showP, dt);
         bool visible = !(_state == IslandState.Hidden || _fullscreen || (_userHidden && _state == IslandState.Compact));
-        _opIsland = Ui.Ease(_opIsland, visible ? 1 : 0, visible ? 14 : 10, dt);
+        double opIsland = !visible ? 0 : _peek ? 0.15 : 1; // see-through leaves a faint ghost so you know it's there
+        _opIsland = Ui.Ease(_opIsland, opIsland, visible ? 14 : 10, dt);
         _ambientWanted = AmbientWanted();
         _ambientOp = Ui.Ease(_ambientOp, _ambientWanted ? 1 : 0, _ambientWanted ? 7 : 11, dt);
 
@@ -563,13 +565,13 @@ public partial class MainWindow : Window
 
         bool settled = _w.Settled && _h.Settled && _r.Settled && _pendingW == null && _pendingH == null
                        && Done(_opCompact, showC) && Done(_opExpanded, showE) && Done(_opPopup, showP)
-                       && Math.Abs(_opIsland - (visible ? 1 : 0)) < 0.01
+                       && Math.Abs(_opIsland - opIsland) < 0.01
                        && Math.Abs(_ambientOp - (_ambientWanted ? 1 : 0)) < 0.01
                        && now >= _animUntil && Math.Abs(BarWidth - _pbarTarget) < 0.5;
         if (settled)
         {
             _w.Value = _w.Target; _h.Value = _h.Target; _r.Value = _r.Target;
-            _opIsland = visible ? 1 : 0;
+            _opIsland = opIsland;
             _ambientOp = _ambientWanted ? 1 : 0;
             ApplyFrame();
             // faded out for a game / fullscreen app: drop the window itself, so even a transparent topmost
@@ -788,7 +790,8 @@ public partial class MainWindow : Window
         if (_ticks % 30 == 0) CheckFullscreen();
         if (_ticks % 60 == 0)
         {
-            if (!_fullscreen) Native.SetWindowPos(_hwnd, Native.HWND_TOPMOST, 0, 0, 0, 0, Native.SWP_NOMOVE | Native.SWP_NOSIZE | Native.SWP_NOACTIVATE);
+            // not while a menu is open: menus are topmost popups too, and re-asserting would bury them under the island
+            if (!_fullscreen && !_menuOpen) Native.SetWindowPos(_hwnd, Native.HWND_TOPMOST, 0, 0, 0, 0, Native.SWP_NOMOVE | Native.SWP_NOSIZE | Native.SWP_NOACTIVATE);
             if (S.EnablePrivacyIndicator) _privacy = SystemInfo.PrivacyInUse(); else _privacy = default;
         }
         if (_ticks % 45 == 0 && S.IdleWidgetMode == "SystemStats") SystemInfo.SampleStats();
@@ -812,6 +815,13 @@ public partial class MainWindow : Window
             over = ExpandedHoverRect().Contains(p) || _bubbleRect.Contains(p) || Mouse.Captured != null || _dragging || _menuOpen;
         else
             over = Inflate(_islandRect, 4).Contains(p) || _bubbleRect.Contains(p) || HotRect().Contains(p);
+
+        // see-through: Ctrl over the island ghosts it and lets clicks reach what's behind; latched (so the click
+        // itself needn't carry Ctrl) until the pointer leaves the area it covered
+        if (!_peek && over && S.CtrlSeeThrough && Native.GetAsyncKeyState(0x11) < 0 && Mouse.Captured == null && !_dragging && !_menuOpen
+            && !(IsActive && Keyboard.FocusedElement is TextBox)) SetPeek(true);
+        else if (_peek && !_peekRect.Contains(p)) SetPeek(false);
+        if (_peek) over = false;
 
         if (over) { _outSince = null; _overSince ??= now; }
         else { _overSince = null; _outSince ??= now; }
@@ -855,6 +865,14 @@ public partial class MainWindow : Window
                 else if (now > _popupUntil && !over) EndPopup();
                 break;
         }
+    }
+
+    void SetPeek(bool on)
+    {
+        _peek = on;
+        _peekRect = Rect.Union(Rect.Union(ExpandedHoverRect(), HotRect()), _bubbleRect);
+        Native.SetClickThrough(_hwnd, on);
+        StartAnimating();
     }
 
     Rect HotRect()

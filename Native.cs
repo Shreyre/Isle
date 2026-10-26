@@ -6,7 +6,7 @@ namespace Isle;
 static class Native
 {
     public const int GWL_EXSTYLE = -20;
-    public const int WS_EX_TOOLWINDOW = 0x80, WS_EX_NOACTIVATE = 0x08000000, WS_EX_TOPMOST = 0x8, WS_EX_APPWINDOW = 0x40000;
+    public const int WS_EX_TOOLWINDOW = 0x80, WS_EX_NOACTIVATE = 0x08000000, WS_EX_TOPMOST = 0x8, WS_EX_APPWINDOW = 0x40000, WS_EX_TRANSPARENT = 0x20;
     public const int WM_HOTKEY = 0x0312, WM_CLIPBOARDUPDATE = 0x031D, WM_MOUSEHWHEEL = 0x020E, WM_DISPLAYCHANGE = 0x007E, WM_DPICHANGED = 0x02E0;
     public const uint SWP_NOSIZE = 0x1, SWP_NOMOVE = 0x2, SWP_NOZORDER = 0x4, SWP_NOACTIVATE = 0x10, SWP_SHOWWINDOW = 0x40;
     public static readonly IntPtr HWND_TOPMOST = new(-1);
@@ -90,6 +90,13 @@ static class Native
         ex &= ~WS_EX_APPWINDOW;
         ex = noActivate ? ex | WS_EX_NOACTIVATE : ex & ~WS_EX_NOACTIVATE;
         SetWindowLongPtr(hwnd, GWL_EXSTYLE, new IntPtr(ex));
+    }
+
+    /// Lets every click fall through the (layered) window to whatever is behind it.
+    public static void SetClickThrough(IntPtr hwnd, bool on)
+    {
+        long ex = GetWindowLongPtr(hwnd, GWL_EXSTYLE).ToInt64();
+        SetWindowLongPtr(hwnd, GWL_EXSTYLE, new IntPtr(on ? ex | WS_EX_TRANSPARENT : ex & ~WS_EX_TRANSPARENT));
     }
 
     /// Reliable foreground switch (Windows blocks SetForegroundWindow from background processes).

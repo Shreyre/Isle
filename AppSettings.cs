@@ -27,6 +27,7 @@ public sealed class AppSettings
     public bool IsPinned { get; set; }
     public int PinTimeoutSeconds { get; set; }                 // 0 = a pin lasts until unpinned; else expires this long after the pointer leaves
     public bool ExpandOnClickOnly { get; set; }
+    public bool CtrlSeeThrough { get; set; } = true;           // tap Ctrl over the island: it ghosts and clicks reach what's behind
     public string ExpandClickMode { get; set; } = "Single";    // Single, Double
     public int DwellTimeMs { get; set; } = 120;
     public int GraceTimeMs { get; set; } = 350;

@@ -207,6 +207,8 @@ public sealed class SettingsWindow : Window
             () => S.ExpandOnClickOnly, v => S.ExpandOnClickOnly = v);
         Seg("Physics", "Behavior", "Click Trigger Mode", "Choose whether a single tap or a quick double-click expands the island.",
             new[] { "Single Click", "Double Click" }, new[] { "Single", "Double" }, () => S.ExpandClickMode, v => S.ExpandClickMode = v);
+        Tog("Physics", "Behavior", "Tap Ctrl to See Through", "With the pointer on the island, tap Ctrl: it fades to a ghost and clicks reach whatever is behind it, until you move the pointer away.",
+            () => S.CtrlSeeThrough, v => S.CtrlSeeThrough = v);
         Tog("Physics", "Behavior", "Keep Island Pinned Open", "Locks the island open after the mouse leaves. The pin button on the open island does the same.",
             () => S.IsPinned, v => S.IsPinned = v);
         Pick("Physics", "Behavior", "Pin Auto-Release", "How long a pin lasts once your mouse moves away, before the island closes by itself.",
