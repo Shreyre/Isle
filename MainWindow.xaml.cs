@@ -21,10 +21,10 @@ namespace Isle;
 public partial class MainWindow : Window
 {
     enum IslandState { Hidden, Compact, Expanded, Popup }
-    enum Page { Media, Timer, Clipboard, Apps, Notes, Ocr, Drop, Tour, Home }
-    static readonly Page[] TabOrder = { Page.Media, Page.Timer, Page.Clipboard, Page.Apps, Page.Notes, Page.Home }; // Home last: saved LastActiveTab indices keep their meaning
-    static readonly string[] TabGlyph = { "", "", "", "", "", "" };
-    static readonly string[] TabName = { "Media", "Timer", "Clipboard", "Apps", "Notes", "Home" };
+    enum Page { Media, Timer, Clipboard, Apps, Notes, Ocr, Drop, Tour, Home, Tasks }
+    static readonly Page[] TabOrder = { Page.Media, Page.Timer, Page.Clipboard, Page.Apps, Page.Notes, Page.Home, Page.Tasks }; // new tabs go last: saved LastActiveTab indices keep their meaning
+    static readonly string[] TabGlyph = { "", "", "", "", "", "", "" };
+    static readonly string[] TabName = { "Media", "Timer", "Clipboard", "Apps", "Notes", "Home", "Tasks" };
 
     static readonly Color Orange = Color.FromRgb(0xFF, 0x9F, 0x0A), Green = Color.FromRgb(0x30, 0xD1, 0x58),
         Red = Color.FromRgb(0xFF, 0x45, 0x3A), Blue = Color.FromRgb(0x0A, 0x84, 0xFF), Secondary = Color.FromArgb(0x99, 0xEB, 0xEB, 0xF5);
@@ -141,7 +141,7 @@ public partial class MainWindow : Window
     {
         ("", "Welcome to Isle", "A new way to interact with your PC. Hover the island to open it — it comes alive with your music, timers, clipboard and alerts."),
         ("", "Media & Live Scrub", "Control Spotify, browsers and any player. Drag the seek bar to jump, click the artwork to open the player, click the source badge to switch sessions."),
-        ("", "Swipe Between Tabs", "Roll the mouse wheel or swipe two fingers on the touchpad over the open island to move between Media, Timer, Clipboard, Apps and Notes."),
+        ("", "Swipe Between Tabs", "Roll the mouse wheel or swipe two fingers on the touchpad over the open island to move between Media, Timer, Clipboard, Apps, Notes and Tasks."),
         ("", "Clipboard Shelf", "Everything you copy is kept: search it, filter by type, pin favourites, drag clips out, extract text from images or look them up with Google Lens."),
         ("", "Timers, Stopwatch & Focus", "Start a countdown from a preset, run a stopwatch with laps, or stay in flow with Pomodoro focus rounds — all as live activities."),
         ("", "Apps, Folders & Drops", "Pin apps and folders for one-click launching, and drop files on the island to save them to a folder or the clipboard shelf."),
@@ -374,6 +374,7 @@ public partial class MainWindow : Window
             if (S.TabClipboardEnabled) l.Add(Page.Clipboard);
             if (S.TabQuickLaunchEnabled) l.Add(Page.Apps);
             if (S.TabNotesEnabled) l.Add(Page.Notes);
+            if (S.TabTasksEnabled) l.Add(Page.Tasks);
             if (l.Count == 0) l.Add(Page.Media);
             return l;
         }
@@ -490,6 +491,7 @@ public partial class MainWindow : Window
             Page.Clipboard => (440, chrome + 290),
             Page.Apps => (420, chrome + 8 + Math.Clamp((int)Math.Ceiling((S.QuickAppPaths.Count + 1) / 5.0), 1, 3) * 82),
             Page.Notes => (420, chrome + 170),
+            Page.Tasks => (420, chrome + 196),
             Page.Ocr => (440, chrome + 200),
             Page.Drop => (420, chrome + 116),
             _ => (440, chrome + 160),
@@ -1170,7 +1172,7 @@ public partial class MainWindow : Window
         }
         _page = p;
         if (IsTab(p)) { int idx = Array.IndexOf(TabOrder, p); if (S.LastActiveTab != idx) { S.LastActiveTab = idx; } }
-        foreach (var (g, pg) in new (Grid, Page)[] { (PageHome, Page.Home), (PageMedia, Page.Media), (PageTimer, Page.Timer), (PageClipboard, Page.Clipboard), (PageApps, Page.Apps), (PageNotes, Page.Notes), (PageOcr, Page.Ocr), (PageDrop, Page.Drop), (PageTour, Page.Tour) })
+        foreach (var (g, pg) in new (Grid, Page)[] { (PageHome, Page.Home), (PageMedia, Page.Media), (PageTimer, Page.Timer), (PageClipboard, Page.Clipboard), (PageApps, Page.Apps), (PageNotes, Page.Notes), (PageTasks, Page.Tasks), (PageOcr, Page.Ocr), (PageDrop, Page.Drop), (PageTour, Page.Tour) })
             g.Visibility = pg == p ? Visibility.Visible : Visibility.Collapsed;
         Header.Visibility = IsTab(p) && S.TabNavigationStyle == "Header" ? Visibility.Visible : Visibility.Collapsed;
         Pages.Margin = new Thickness(18, Header.Visibility == Visibility.Visible ? 2 : 16, 18, 6);
@@ -1186,6 +1188,7 @@ public partial class MainWindow : Window
             case Page.Clipboard: _clipShown = 30; RebuildClips(); break;
             case Page.Apps: BuildApps(); break;
             case Page.Notes: NotesBox.Text = S.Notes; NotesHint.Visibility = string.IsNullOrEmpty(S.Notes) ? Visibility.Visible : Visibility.Collapsed; break;
+            case Page.Tasks: BuildTasks(); break;
             case Page.Tour: RefreshTour(); break;
             case Page.Drop: DropFolderName.Text = IOPath.GetFileName(DropFolderPath()); break;
         }
@@ -2247,6 +2250,7 @@ public partial class MainWindow : Window
                 ((IsDescendant(ClipScroll, src) && ClipScroll.ScrollableHeight > 0) ||
                  (IsDescendant(AppsScroll, src) && AppsScroll.ScrollableHeight > 0) ||
                  (IsDescendant(LapsScroll, src) && LapsScroll.ScrollableHeight > 0) ||
+                 (IsDescendant(TaskScroll, src) && TaskScroll.ScrollableHeight > 0) ||
                  (IsDescendant(NotesBox, src) && NotesBox.ExtentHeight > NotesBox.ViewportHeight) ||
                  IsDescendant(OcrText, src) || IsDescendant(VolumeBtn, src) || IsDescendant(MVolumeRow, src)))
                 return;
@@ -2321,6 +2325,69 @@ public partial class MainWindow : Window
             S.Notes = NotesBox.Text;
             _notesSave.Stop(); _notesSave.Start();
         };
+
+        TaskBox.TextChanged += (_, _) => TaskHint.Visibility = TaskBox.Text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+        TaskBox.KeyDown += (_, e) =>
+        {
+            if (e.Key != Key.Enter) return;
+            e.Handled = true;
+            if (string.IsNullOrWhiteSpace(TaskBox.Text)) return;
+            S.Tasks.Insert(0, new TodoItem { Text = TaskBox.Text.Trim() });
+            TaskBox.Clear(); // focus stays in the box, ready for the next one
+            S.Save();
+            BuildTasks();
+        };
+    }
+
+    void BuildTasks()
+    {
+        TaskList.Children.Clear();
+        // Reminders-style: open tasks on top, finished ones sink to the bottom
+        foreach (var t in S.Tasks.Where(t => !t.Done).Concat(S.Tasks.Where(t => t.Done)))
+            TaskList.Children.Add(TaskRow(t));
+        TaskEmpty.Visibility = S.Tasks.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    Border TaskRow(TodoItem t)
+    {
+        var tertiary = (Brush)FindResource("Tertiary");
+        var check = new Border
+        {
+            Width = 18, Height = 18, CornerRadius = new CornerRadius(9), BorderThickness = new Thickness(1.5), Cursor = Cursors.Hand,
+            VerticalAlignment = VerticalAlignment.Center, ToolTip = t.Done ? "Mark as not done" : "Mark as done",
+            BorderBrush = t.Done ? Ui.Brush(Accent) : tertiary, Background = t.Done ? Ui.Brush(Accent) : Brushes.Transparent,
+            Child = t.Done ? new TextBlock { Text = "", FontFamily = (FontFamily)FindResource("Icons"), FontSize = 10, Foreground = Brushes.Black, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center } : null,
+        };
+        check.MouseLeftButtonUp += (_, e) => { t.Done = !t.Done; S.Save(); BuildTasks(); e.Handled = true; };
+
+        var text = new TextBlock
+        {
+            Text = t.Text, FontSize = 13.5, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(10, 0, 8, 0), ToolTip = t.Text,
+            Foreground = t.Done ? tertiary : Brushes.White, TextDecorations = t.Done ? TextDecorations.Strikethrough : null,
+        };
+
+        var del = new Button { Style = (Style)FindResource("Glyph"), Width = 22, Height = 22, FontSize = 10, Content = "", Foreground = (Brush)FindResource("Secondary"), ToolTip = "Delete", Opacity = 0 };
+        del.Click += (_, _) => { S.Tasks.Remove(t); S.Save(); BuildTasks(); };
+
+        var g = new Grid();
+        g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        g.ColumnDefinitions.Add(new ColumnDefinition());
+        g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        Grid.SetColumn(text, 1);
+        Grid.SetColumn(del, 2);
+        g.Children.Add(check); g.Children.Add(text); g.Children.Add(del);
+
+        var row = new Border { CornerRadius = new CornerRadius(8), Padding = new Thickness(8, 5, 4, 5), Background = Brushes.Transparent, Child = g };
+        row.MouseEnter += (_, _) => { del.Opacity = 1; row.Background = Ui.Brush(Color.FromRgb(0x1C, 0x1C, 0x1E)); };
+        row.MouseLeave += (_, _) => { del.Opacity = 0; row.Background = Brushes.Transparent; };
+        row.ContextMenu = Menu(
+            (t.Done ? "Mark as Not Done" : "Mark as Done", () => { t.Done = !t.Done; S.Save(); BuildTasks(); }),
+            ("Copy", () => System.Windows.Clipboard.SetText(t.Text)),
+            ("-", null),
+            ("Delete", () => { S.Tasks.Remove(t); S.Save(); BuildTasks(); }),
+            (S.Tasks.Any(x => x.Done) ? "Clear Completed" : null, () => { S.Tasks.RemoveAll(x => x.Done); S.Save(); BuildTasks(); }));
+        return row;
     }
 
     string DropFolderPath()

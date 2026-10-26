@@ -279,6 +279,8 @@ public sealed class SettingsWindow : Window
             () => S.TabQuickLaunchEnabled, v => S.TabQuickLaunchEnabled = v);
         Tog("Tabs", "Modules", "Quick Notes Tab", "A persistent scratchpad that lives inside the island.",
             () => S.TabNotesEnabled, v => S.TabNotesEnabled = v);
+        Tog("Tabs", "Modules", "Tasks Tab", "A Reminders-style to-do list: type a task and press Enter, tick the circle when it's done.",
+            () => S.TabTasksEnabled, v => S.TabTasksEnabled = v);
         Seg("Tabs", "Modules", "Tab Navigation Style", "Choose between top header icon switcher, bottom indicator dots, or disable tab switchers.",
             new[] { "None", "Header", "Dots" }, new[] { "None", "Header", "Dots" }, () => S.TabNavigationStyle, v => S.TabNavigationStyle = v);
         Tog("Tabs", "Live Lyrics & Radar", "Show Lyrics in Compact Island", "Show active live lyric line in the compact idle capsule instead of track title.",

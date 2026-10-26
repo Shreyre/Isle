@@ -93,6 +93,8 @@ public sealed class AppSettings
     public bool TabNotesEnabled { get; set; } = true;
     public bool TabHomeEnabled { get; set; } = true;           // start page shown when nothing is playing
     public string Notes { get; set; } = "";
+    public bool TabTasksEnabled { get; set; } = true;
+    public List<TodoItem> Tasks { get; set; } = new();
     public bool EnableVolumePopup { get; set; } = true;
     public bool EnableLockKeysPopup { get; set; } = true;
     public bool EnablePrivacyIndicator { get; set; } = true;
@@ -189,6 +191,8 @@ public sealed class AppSettings
     void Normalize()
     {
         QuickAppPaths ??= new();
+        Tasks ??= new();
+        Tasks.RemoveAll(t => t == null || string.IsNullOrWhiteSpace(t.Text));
         IslandTextScale = Math.Clamp(IslandTextScale <= 0 ? 1 : IslandTextScale, 0.85, 1.3);
         ThinLineThickness = Math.Clamp(ThinLineThickness, 2, 8);
         IdleHideDelayMs = Math.Clamp(IdleHideDelayMs, 500, 30000);
@@ -199,4 +203,10 @@ public sealed class AppSettings
         ClipboardMaxItems = Math.Clamp(ClipboardMaxItems, 10, 100000);
         if (SeekbarStyle is not ("Modern" or "Thin" or "Soundwave")) SeekbarStyle = "Modern";
     }
+}
+
+public sealed class TodoItem
+{
+    public string Text { get; set; } = "";
+    public bool Done { get; set; }
 }

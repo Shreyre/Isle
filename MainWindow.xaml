@@ -171,12 +171,12 @@
             <Setter Property="CaretBrush" Value="White"/>
             <Setter Property="SelectionBrush" Value="#0A84FF"/>
             <Setter Property="FontSize" Value="13"/>
-            <Setter Property="Padding" Value="8,5"/>
+            <Setter Property="Padding" Value="8,10"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="TextBox">
                         <Border x:Name="b" CornerRadius="10" Background="#1C1C1E" BorderBrush="#33FFFFFF" BorderThickness="0">
-                            <ScrollViewer x:Name="PART_ContentHost" Margin="{TemplateBinding Padding}" VerticalAlignment="{TemplateBinding VerticalContentAlignment}"/>
+                            <ScrollViewer x:Name="PART_ContentHost" VerticalAlignment="{TemplateBinding VerticalContentAlignment}"/>
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="b" Property="BorderThickness" Value="1"/></Trigger>
@@ -568,7 +568,7 @@
                             <RowDefinition Height="Auto"/>
                         </Grid.RowDefinitions>
                         <Grid>
-                            <TextBox x:Name="ClipSearch" Style="{StaticResource Field}" Padding="30,5,8,5"/>
+                            <TextBox x:Name="ClipSearch" Style="{StaticResource Field}" Padding="30,10,8,10"/>
                             <TextBlock Text="&#xE721;" FontFamily="{StaticResource Icons}" FontSize="12" Foreground="{StaticResource Secondary}" VerticalAlignment="Center" Margin="11,0,0,0" IsHitTestVisible="False"/>
                             <TextBlock x:Name="ClipSearchHint" Text="Search clips" Foreground="{StaticResource Tertiary}" VerticalAlignment="Center" Margin="31,0,0,0" IsHitTestVisible="False"/>
                         </Grid>
@@ -602,7 +602,24 @@
                     <!-- ===== NOTES (extra) ===== -->
                     <Grid x:Name="PageNotes" Visibility="Collapsed">
                         <TextBox x:Name="NotesBox" Style="{StaticResource Field}" AcceptsReturn="True" AcceptsTab="True" TextWrapping="Wrap" VerticalContentAlignment="Top" VerticalScrollBarVisibility="Auto" FontSize="13.5"/>
-                        <TextBlock x:Name="NotesHint" Text="Quick notes — saved automatically" Foreground="{StaticResource Tertiary}" Margin="12,8" IsHitTestVisible="False"/>
+                        <TextBlock x:Name="NotesHint" Text="Quick notes — saved automatically" Foreground="{StaticResource Tertiary}" Margin="10,10" IsHitTestVisible="False"/>
+                    </Grid>
+
+                    <!-- ===== TASKS (extra) ===== -->
+                    <Grid x:Name="PageTasks" Visibility="Collapsed">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+                        <Grid>
+                            <TextBox x:Name="TaskBox" Style="{StaticResource Field}" Padding="30,10,8,10"/>
+                            <TextBlock Text="&#xE710;" FontFamily="{StaticResource Icons}" FontSize="12" Foreground="{StaticResource Secondary}" VerticalAlignment="Center" Margin="11,0,0,0" IsHitTestVisible="False"/>
+                            <TextBlock x:Name="TaskHint" Text="New task — press Enter" Foreground="{StaticResource Tertiary}" VerticalAlignment="Center" Margin="31,0,0,0" IsHitTestVisible="False"/>
+                        </Grid>
+                        <ScrollViewer x:Name="TaskScroll" Grid.Row="1" Margin="0,6,0,0" VerticalScrollBarVisibility="Auto">
+                            <StackPanel x:Name="TaskList"/>
+                        </ScrollViewer>
+                        <TextBlock x:Name="TaskEmpty" Grid.Row="1" Text="No tasks — you're all caught up" Style="{StaticResource T2}" HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False"/>
                     </Grid>
 
                     <!-- ===== OCR RESULT ===== -->
