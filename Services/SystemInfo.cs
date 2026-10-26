@@ -1,0 +1,281 @@
+using System.Media;
+using System.Net.Http;
+using System.Net.NetworkInformation;
+using System.Text.Json;
+using System.Windows.Input;
+using Microsoft.Win32;
+
+namespace Isle.Services;
+
+public readonly record struct BatteryState(bool HasBattery, int Percent, bool PluggedIn, bool Charging);
+
+public static class SystemInfo
+{
+    static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(8) };
+    static SystemInfo() => Http.DefaultRequestHeaders.UserAgent.ParseAdd("Isle/1.0");
+
+    // ---------- battery ----------
+    public static BatteryState Battery()
+    {
+        var ps = System.Windows.Forms.SystemInformation.PowerStatus;
+        bool has = !ps.BatteryChargeStatus.HasFlag(System.Windows.Forms.BatteryChargeStatus.NoSystemBattery)
+                   && ps.BatteryChargeStatus != System.Windows.Forms.BatteryChargeStatus.Unknown;
+        int pct = (int)Math.Round(Math.Clamp(ps.BatteryLifePercent, 0f, 1f) * 100);
+        bool plugged = ps.PowerLineStatus == System.Windows.Forms.PowerLineStatus.Online;
+        bool charging = plugged && (ps.BatteryChargeStatus.HasFlag(System.Windows.Forms.BatteryChargeStatus.Charging) || pct < 100);
+        return new BatteryState(has, has ? pct : 100, plugged || !has, charging);
+    }
+
+    // ---------- CPU / RAM / network ----------
+    static ulong _idle, _total;
+    static long _rx, _tx;
+    static DateTime _netAt;
+    public static double Cpu { get; private set; }
+    public static double Ram { get; private set; }
+    public static double DownBps { get; private set; }
+    public static double UpBps { get; private set; }
+
+    public static void SampleStats()
+    {
+        if (Native.GetSystemTimes(out var idle, out var kernel, out var user))
+        {
+            ulong total = kernel.Value + user.Value, idl = idle.Value;
+            if (_total != 0 && total > _total) Cpu = 100.0 * (1 - (double)(idl - _idle) / (total - _total));
+            _idle = idl; _total = total;
+        }
+        var m = new Native.MEMORYSTATUSEX { dwLength = (uint)System.Runtime.InteropServices.Marshal.SizeOf<Native.MEMORYSTATUSEX>() };
+        if (Native.GlobalMemoryStatusEx(ref m)) Ram = m.dwMemoryLoad;
+
+        try
+        {
+            long rx = 0, tx = 0;
+            foreach (var ni in NetworkInterface.GetAllNetworkInterfaces())
+            {
+                if (ni.OperationalStatus != OperationalStatus.Up || ni.NetworkInterfaceType == NetworkInterfaceType.Loopback) continue;
+                var s = ni.GetIPStatistics();
+                rx += s.BytesReceived; tx += s.BytesSent;
+            }
+            var now = DateTime.UtcNow;
+            double dt = (now - _netAt).TotalSeconds;
+            if (_netAt != default && dt > 0.2) { DownBps = Math.Max(0, (rx - _rx) / dt); UpBps = Math.Max(0, (tx - _tx) / dt); }
+            _rx = rx; _tx = tx; _netAt = now;
+        }
+        catch { }
+    }
+
+    public static string FormatRate(double bps) =>
+        bps >= 1 << 20 ? $"{bps / (1 << 20):0.0} MB/s" : bps >= 1024 ? $"{bps / 1024:0} KB/s" : $"{bps:0} B/s";
+
+    // ---------- camera / microphone in use (privacy indicator) ----------
+    public static (bool Mic, bool Cam) PrivacyInUse() => (InUse("microphone"), InUse("webcam"));
+
+    static bool InUse(string capability)
+    {
+        try
+        {
+            using var root = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\" + capability);
+            return root != null && Scan(root);
+        }
+        catch { return false; }
+
+        static bool Scan(RegistryKey key)
+        {
+            foreach (var name in key.GetSubKeyNames())
+            {
+                using var sub = key.OpenSubKey(name);
+                if (sub == null) continue;
+                if (name == "NonPackaged") { if (Scan(sub)) return true; continue; }
+                if (sub.GetValue("LastUsedTimeStop") is long stop && stop == 0 && sub.GetValue("LastUsedTimeStart") is long start && start > 0)
+                    return true;
+            }
+            return false;
+        }
+    }
+
+    // ---------- weather (Open-Meteo, no API key) ----------
+    public sealed record Weather(double TempC, int Code, string Place);
+
+    public static async Task<Weather> GetWeatherAsync(string city)
+    {
+        try
+        {
+            double lat, lon; string place;
+            if (string.IsNullOrWhiteSpace(city))
+            {
+                using var ip = JsonDocument.Parse(await Http.GetStringAsync("http://ip-api.com/json/?fields=lat,lon,city"));
+                lat = ip.RootElement.GetProperty("lat").GetDouble();
+                lon = ip.RootElement.GetProperty("lon").GetDouble();
+                place = ip.RootElement.GetProperty("city").GetString();
+            }
+            else
+            {
+                using var geo = JsonDocument.Parse(await Http.GetStringAsync(
+                    "https://geocoding-api.open-meteo.com/v1/search?count=1&name=" + Uri.EscapeDataString(city.Trim())));
+                var r = geo.RootElement.GetProperty("results")[0];
+                lat = r.GetProperty("latitude").GetDouble();
+                lon = r.GetProperty("longitude").GetDouble();
+                place = r.GetProperty("name").GetString();
+            }
+            string url = FormattableString.Invariant($"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current=temperature_2m,weather_code");
+            using var w = JsonDocument.Parse(await Http.GetStringAsync(url));
+            var cur = w.RootElement.GetProperty("current");
+            return new Weather(cur.GetProperty("temperature_2m").GetDouble(), cur.GetProperty("weather_code").GetInt32(), place);
+        }
+        catch (Exception ex) { AppHost.Log("Weather: " + ex.Message); return null; }
+    }
+
+    /// Monochrome weather symbol (Segoe UI Symbol) for a WMO weather code — SF Symbols style.
+    public static string WeatherGlyph(int code) => code switch
+    {
+        0 => "☀",                          // sun
+        1 or 2 => "⛅",                     // sun behind cloud
+        3 or 45 or 48 => "☁",              // cloud / fog
+        >= 51 and <= 67 or >= 80 and <= 82 => "☂", // rain
+        >= 71 and <= 77 or 85 or 86 => "❄",        // snow
+        >= 95 => "⚡",                      // thunder
+        _ => "☁",
+    };
+
+    // ---------- Bluetooth battery for a connected audio device ----------
+    public static async Task<int?> BluetoothBatteryAsync(string endpointName)
+    {
+        try
+        {
+            // "Headphones (AirPods Pro)" → "AirPods Pro"
+            string name = endpointName;
+            int a = name.IndexOf('('), b = name.LastIndexOf(')');
+            if (a >= 0 && b > a) name = name[(a + 1)..b];
+            name = name.Replace(" Stereo", "").Replace(" Hands-Free AG Audio", "").Replace(" Hands-Free", "").Trim();
+            const string battKey = "{104EA319-6EE2-4701-BD47-8DDBF425BBE5} 2";
+            var devs = await Windows.Devices.Enumeration.Pnp.PnpObject.FindAllAsync(
+                Windows.Devices.Enumeration.Pnp.PnpObjectType.Device,
+                new[] { "System.ItemNameDisplay", battKey },
+                "System.Devices.DeviceInstanceId:~~\"BTHENUM\"");
+            foreach (var d in devs)
+            {
+                if (d.Properties.TryGetValue(battKey, out var v) && v is byte level &&
+                    d.Properties.TryGetValue("System.ItemNameDisplay", out var n) && n is string dn &&
+                    (dn.Contains(name, StringComparison.OrdinalIgnoreCase) || name.Contains(dn, StringComparison.OrdinalIgnoreCase)))
+                    return level;
+            }
+        }
+        catch (Exception ex) { AppHost.Log("BT battery: " + ex.Message); }
+        return null;
+    }
+
+    public static bool LooksLikeHeadphones(string name)
+    {
+        string l = name.ToLowerInvariant();
+        return new[] { "airpod", "bud", "headphone", "headset", "earphone", "in-ear", "over-ear", "on-ear", "bose", "quietcomfort", "wh-", "wf-", "beats", "jabra", "galaxy" }
+            .Any(l.Contains);
+    }
+
+    // ---------- hotkey ----------
+    public static bool TryParseHotkey(string text, out uint mods, out uint vk)
+    {
+        mods = 0; vk = 0;
+        if (string.IsNullOrWhiteSpace(text)) return false;
+        foreach (var raw in text.Split('+', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            switch (raw.ToLowerInvariant())
+            {
+                case "ctrl": case "control": mods |= Native.MOD_CONTROL; break;
+                case "alt": mods |= Native.MOD_ALT; break;
+                case "shift": mods |= Native.MOD_SHIFT; break;
+                case "win": case "windows": mods |= Native.MOD_WIN; break;
+                default:
+                    string k = raw.Length == 1 && char.IsDigit(raw[0]) ? "D" + raw : raw;
+                    if (Enum.TryParse<Key>(k, true, out var key)) vk = (uint)KeyInterop.VirtualKeyFromKey(key);
+                    break;
+            }
+        }
+        return vk != 0;
+    }
+
+    // ---------- fullscreen detection ----------
+    public static bool IsForegroundFullscreen(IntPtr ownWindow)
+    {
+        IntPtr fg = Native.GetForegroundWindow();
+        if (fg == IntPtr.Zero || fg == ownWindow || fg == Native.GetShellWindow() || fg == Native.GetDesktopWindow()) return false;
+        string cls = Native.ClassOf(fg);
+        if (cls is "Progman" or "WorkerW" or "Shell_TrayWnd" or "Shell_SecondaryTrayWnd" or "XamlExplorerHostIslandWindow"
+            or "Windows.UI.Core.CoreWindow" or "TopLevelWindowForOverflowXamlIsland") return false;
+        if (!Native.GetWindowRect(fg, out var r)) return false;
+        var mon = Native.MonitorFromWindow(fg, 2);
+        if (mon != Native.MonitorFromWindow(ownWindow, 2)) return false; // fullscreen on another display doesn't concern us
+        var mi = new Native.MONITORINFOEX { cbSize = System.Runtime.InteropServices.Marshal.SizeOf<Native.MONITORINFOEX>() };
+        if (!Native.GetMonitorInfo(mon, ref mi)) return false;
+        var m = mi.rcMonitor;
+        return r.Left <= m.Left && r.Top <= m.Top && r.Right >= m.Right && r.Bottom >= m.Bottom;
+    }
+
+    // ---------- timer chime (synthesised, Apple "Radial"-like triple tone) ----------
+    static byte[] _chime;
+    public static void PlayChime()
+    {
+        try
+        {
+            _chime ??= BuildChime();
+            using var ms = new MemoryStream(_chime);
+            new SoundPlayer(ms).Play();
+        }
+        catch { SystemSounds.Asterisk.Play(); }
+    }
+
+    static byte[] BuildChime()
+    {
+        const int rate = 44100;
+        double[] notes = { 1318.5, 1760.0, 2093.0, 1318.5, 1760.0, 2093.0 };
+        int noteLen = (int)(rate * 0.16), gap = (int)(rate * 0.04);
+        var samples = new List<short>();
+        for (int n = 0; n < notes.Length; n++)
+        {
+            for (int i = 0; i < noteLen; i++)
+            {
+                double t = (double)i / rate;
+                double env = Math.Min(1, i / (rate * 0.005)) * Math.Exp(-t * 14);
+                double v = Math.Sin(2 * Math.PI * notes[n] * t) * 0.7 + Math.Sin(4 * Math.PI * notes[n] * t) * 0.15;
+                samples.Add((short)(v * env * 12000));
+            }
+            samples.AddRange(Enumerable.Repeat((short)0, n == 2 ? rate / 3 : gap));
+        }
+        using var ms = new MemoryStream();
+        using var w = new BinaryWriter(ms);
+        int dataLen = samples.Count * 2;
+        w.Write("RIFF"u8); w.Write(36 + dataLen); w.Write("WAVE"u8);
+        w.Write("fmt "u8); w.Write(16); w.Write((short)1); w.Write((short)1); w.Write(rate); w.Write(rate * 2); w.Write((short)2); w.Write((short)16);
+        w.Write("data"u8); w.Write(dataLen);
+        foreach (var s in samples) w.Write(s);
+        return ms.ToArray();
+    }
+}
+
+/// Detects a vigorous horizontal back-and-forth of the cursor.
+public sealed class ShakeDetector
+{
+    readonly Queue<(DateTime t, int dir)> _reversals = new();
+    int _lastX = int.MinValue, _dir, _travel;
+    DateTime _cooldown;
+
+    public bool Feed(int x, string sensitivity)
+    {
+        var now = DateTime.UtcNow;
+        if (_lastX == int.MinValue) { _lastX = x; return false; }
+        int dx = x - _lastX;
+        _lastX = x;
+        if (dx == 0) return false;
+        int dir = Math.Sign(dx);
+        (int minTravel, int needed) = sensitivity switch { "High" => (40, 4), "Low" => (120, 6), _ => (70, 5) };
+        if (dir == _dir) { _travel += Math.Abs(dx); return false; }
+        if (_travel >= minTravel) _reversals.Enqueue((now, dir));
+        _dir = dir; _travel = Math.Abs(dx);
+        while (_reversals.Count > 0 && (now - _reversals.Peek().t).TotalMilliseconds > 900) _reversals.Dequeue();
+        if (_reversals.Count >= needed && now > _cooldown)
+        {
+            _reversals.Clear();
+            _cooldown = now.AddSeconds(1.2);
+            return true;
+        }
+        return false;
+    }
+}

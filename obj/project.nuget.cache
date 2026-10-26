@@ -1,0 +1,17 @@
+{
+  "version": 2,
+  "dgSpecHash": "4b7Sq8GPtUQ=",
+  "success": true,
+  "projectFilePath": "C:\\Users\\patel\\OneDrive\\Documents\\Dynamic Island Windows\\Isle.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\patel\\.nuget\\packages\\microsoft.net.illink.tasks\\8.0.24\\microsoft.net.illink.tasks.8.0.24.nupkg.sha512",
+    "C:\\Users\\patel\\.nuget\\packages\\naudio.core\\2.2.1\\naudio.core.2.2.1.nupkg.sha512",
+    "C:\\Users\\patel\\.nuget\\packages\\naudio.wasapi\\2.2.1\\naudio.wasapi.2.2.1.nupkg.sha512",
+    "C:\\Users\\patel\\.nuget\\packages\\microsoft.netcore.app.runtime.win-x64\\8.0.24\\microsoft.netcore.app.runtime.win-x64.8.0.24.nupkg.sha512",
+    "C:\\Users\\patel\\.nuget\\packages\\microsoft.windowsdesktop.app.runtime.win-x64\\8.0.24\\microsoft.windowsdesktop.app.runtime.win-x64.8.0.24.nupkg.sha512",
+    "C:\\Users\\patel\\.nuget\\packages\\microsoft.aspnetcore.app.runtime.win-x64\\8.0.24\\microsoft.aspnetcore.app.runtime.win-x64.8.0.24.nupkg.sha512",
+    "C:\\Users\\patel\\.nuget\\packages\\microsoft.netcore.app.crossgen2.win-x64\\8.0.24\\microsoft.netcore.app.crossgen2.win-x64.8.0.24.nupkg.sha512",
+    "C:\\Users\\patel\\.nuget\\packages\\microsoft.windows.sdk.net.ref\\10.0.19041.56\\microsoft.windows.sdk.net.ref.10.0.19041.56.nupkg.sha512"
+  ],
+  "logs": []
+}

@@ -1,0 +1,46 @@
+Isle
+====
+
+A Dynamic Island for Windows: a from-scratch clone of "Dynamic Edge" (EyuelEngida.DynamicIslandWin 3.0.0) styled after
+Apple's Dynamic Island. WPF / .NET 8. Every "Plus" feature of the original is included and unlocked.
+
+Run:    publish\Isle.exe                     (launching it again opens Settings; tray icon has Settings/Quit)
+Build:  dotnet build                          (needs .NET 8 SDK)
+Ship:   dotnet publish -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -o publish
+Data:   %LOCALAPPDATA%\Isle                   (settings.json, Clipboard\, app.log)
+        On first run the original app's settings are imported (functional choices only; motion/look reset to Apple style).
+
+Layout
+  App.cs                 entry point, single instance, tray, AppHost (shared state)
+  AppSettings.cs         every setting (names match the original's settings.json)
+  MainWindow.xaml(.cs)   the island: spring-physics morphing, compact / expanded / popup live activities, all tabs
+  SettingsWindow.cs      macOS System Settings-style preferences with search
+  Controls\Visuals.cs    waveform, seekbar (modern/thin/wavy), dot-matrix clock, eyes, pet, ring, battery glyph
+  Services\              media (SMTC), audio (WASAPI loopback + volume), clipboard/OCR/Lens/Quick Look,
+                         lyrics (LRCLIB) + floating lyrics window, Music Radar (Shazam signature), system info, icons
+
+Features (original)
+  Dock top / bottom / left / right / top-left / top-right; thin line, floating capsule or bezel notch styles
+  Hover dwell / exit grace / hot zone, click or double-click to expand, pin open, auto-collapse to line,
+  stealth auto-hide, auto-hide in fullscreen, multi-monitor + follow cursor, Alt+H hotkey, magic shake
+  Media: art (click = open player), source badge (click = switch session), scrubber, live WASAPI waveform,
+  volume flyout (scroll on speaker), synced lyrics (expanded + compact), ambient album-art glow, Music Radar
+  Timer presets + custom, stopwatch with laps, timer sound; clipboard shelf with search, filters, pin, drag out,
+  OCR, Google Lens, retention / capacity / privacy exclusions, export; quick-launch apps & folders; drop zone
+  Idle widgets: clock (classic / bold notch / dot matrix, 12/24h), battery, track, CPU/RAM, dot, eyes, eyeballs
+  Pet companion (cat, dog, bunny, ghost), headset & battery & track popups, quiet feed / silent dormant,
+  colours, accent, theme, text scale 85-130%, tab navigation styles, welcome tour
+
+Extras (not in the original)
+  Apple "minimal" bubble when two live activities run, album-colour tinted waveform, Focus/Pomodoro timer,
+  Notes tab, volume HUD, Caps/Num Lock HUD, camera/mic privacy dot, weather widget, network speed,
+  macOS Quick Look-style clip preview, password-manager-aware clipboard, custom hex colours.
+
+Look & footprint
+  Typography: SF Pro if installed, otherwise the bundled Inter / Inter Display (SIL OFL, Assets\Fonts) — drawn to match SF.
+  Settings window mimics macOS System Settings (traffic lights, toolbar history, pane cards, blue switches);
+  Settings > Appearance > "Apple Look" restores the iPhone-style motion and visuals in one click.
+  Memory: software rendering (no Direct3D stack), ReadyToRun, non-concurrent GC with ConserveMemory, and an idle
+  working-set trim keep it around 25-35 MB in Task Manager (~65 MB committed).
+
+Not included: the original's 8-language UI (English only).
