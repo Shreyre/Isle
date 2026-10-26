@@ -21,10 +21,10 @@ namespace Isle;
 public partial class MainWindow : Window
 {
     enum IslandState { Hidden, Compact, Expanded, Popup }
-    enum Page { Media, Timer, Clipboard, Apps, Notes, Ocr, Drop, Tour }
-    static readonly Page[] TabOrder = { Page.Media, Page.Timer, Page.Clipboard, Page.Apps, Page.Notes };
-    static readonly string[] TabGlyph = { "", "", "", "", "" };
-    static readonly string[] TabName = { "Media", "Timer", "Clipboard", "Apps", "Notes" };
+    enum Page { Media, Timer, Clipboard, Apps, Notes, Ocr, Drop, Tour, Home }
+    static readonly Page[] TabOrder = { Page.Media, Page.Timer, Page.Clipboard, Page.Apps, Page.Notes, Page.Home }; // Home last: saved LastActiveTab indices keep their meaning
+    static readonly string[] TabGlyph = { "", "", "", "", "", "" };
+    static readonly string[] TabName = { "Media", "Timer", "Clipboard", "Apps", "Notes", "Home" };
 
     static readonly Color Orange = Color.FromRgb(0xFF, 0x9F, 0x0A), Green = Color.FromRgb(0x30, 0xD1, 0x58),
         Red = Color.FromRgb(0xFF, 0x45, 0x3A), Blue = Color.FromRgb(0x0A, 0x84, 0xFF), Secondary = Color.FromArgb(0x99, 0xEB, 0xEB, 0xF5);
@@ -68,6 +68,14 @@ public partial class MainWindow : Window
     readonly ScaleTransform _islandScale = new(1, 1);
     readonly RectangleGeometry _clip = new();
     double _compactW = 120, _compactH = 34, _popupW = 300, _popupH = 34;
+    bool _hoverBump; // compact island swells slightly under the pointer
+
+    // timed micro-animations, advanced by the render loop until _animUntil
+    DateTime _animUntil, _popupInAt, _popupTrailAt, _pageInAt, _trackInAt, _playPopAt;
+    int _pageDir = 1, _trackDir = 1;
+    Page _prevPage;
+    double _ambientOp, _pbarTarget;
+    bool _ambientWanted;
 
     // ---- services ----
     readonly MediaService _media = new();
@@ -91,6 +99,14 @@ public partial class MainWindow : Window
     string _popupKind = "";
     string _lastTrackPopupApp = "";
     DateTime _lastTrackPopupAt;
+    // what the island last announced, so each song pops once and each play/pause once
+    string _announcedKey = "";
+    bool _announcedPlaying;
+    DateTime? _playFlipSince;
+    DateTime _islandPlayClickAt, _prevClickAt;
+    ImageSource _partFor, _martFor, _homeArtFor;
+    string _homeChipsKey;
+    bool _mediaWasPlaying;
 
     // system watchers
     BatteryState _battery;
@@ -133,7 +149,7 @@ public partial class MainWindow : Window
 
     DispatcherTimer _notesSave;
     readonly DateTime _startedAt = DateTime.Now;
-    Path _playIcon, _pauseIcon;
+    Path _playIcon, _pauseIcon, _homePlay, _homePause;
 
     public MainWindow()
     {
@@ -141,6 +157,8 @@ public partial class MainWindow : Window
         _playIcon = TransportIcon("GPlay", 19, 22);
         _pauseIcon = TransportIcon("GPause", 17, 21);
         PlayBtn.Content = _playIcon;
+        _homePlay = TransportIcon("GPlay", 13, 15);
+        _homePause = TransportIcon("GPause", 12, 15);
         Island.RenderTransform = _islandScale;
         Island.Clip = _clip;
         _w.Snap(120); _h.Snap(34); _r.Snap(17);
@@ -268,7 +286,19 @@ public partial class MainWindow : Window
         return new Point((c.X - r.Left) / _scale, (c.Y - r.Top) / _scale);
     }
 
-    bool IsCursorOver() => Inflate(_islandRect, 10).Contains(CursorDip());
+    bool IsCursorOver() => ExpandedHoverRect().Contains(CursorDip());
+
+    /// While open (or opening), the pointer counts as "over" anywhere the island is or is springing towards:
+    /// testing only the half-grown shape closed it again the instant it opened when entered from the hot zone's ends.
+    Rect ExpandedHoverRect() => Inflate(Rect.Union(_islandRect, TargetRect()), 14);
+
+    Rect TargetRect()
+    {
+        var (w, h, _) = TargetShape();
+        double s = S.IslandTextScale;
+        var (ax, ay, hx, hy) = Anchor();
+        return new Rect(ax - hx * w * s, ay - hy * h * s, w * s, h * s);
+    }
 
     static Rect Inflate(Rect r, double d) { if (r.IsEmpty) return r; r.Inflate(d, d); return r; }
 
@@ -313,7 +343,6 @@ public partial class MainWindow : Window
         Pet.Visibility = S.IslandPetEnabled ? Visibility.Visible : Visibility.Collapsed;
         Pet.Kind = S.IslandPetType;
         RadarBtn.Visibility = S.EnableMusicRadar ? Visibility.Visible : Visibility.Collapsed;
-        PinMark.Visibility = S.IsPinned ? Visibility.Visible : Visibility.Collapsed;
         BuildTabChrome();
         BuildQuickApps();
         BuildIslandMenu();
@@ -338,6 +367,7 @@ public partial class MainWindow : Window
         get
         {
             var l = new List<Page>();
+            if (S.TabHomeEnabled) l.Add(Page.Home);
             if (S.TabMediaEnabled) l.Add(Page.Media);
             if (S.TabTimerEnabled) l.Add(Page.Timer);
             if (S.TabClipboardEnabled) l.Add(Page.Clipboard);
@@ -388,6 +418,7 @@ public partial class MainWindow : Window
         var tabs = EnabledTabs;
         if (MediaLive && tabs.Contains(Page.Media)) return Page.Media;
         if (TimerLive && tabs.Contains(Page.Timer)) return Page.Timer;
+        if (tabs.Contains(Page.Home)) return Page.Home; // nothing live: the start page, not an empty "Not Playing"
         int i = Math.Clamp(S.LastActiveTab, 0, TabOrder.Length - 1);
         return tabs.Contains(TabOrder[i]) ? TabOrder[i] : tabs[0];
     }
@@ -429,9 +460,11 @@ public partial class MainWindow : Window
                 return IsSide ? (t, 90, t / 2) : (90, t, t / 2);
             case IslandState.Compact:
                 if (_userHidden) return IsSide ? (t, 60, t / 2) : (60, t, t / 2);
-                if (AsLine) return IsSide ? (t, Math.Max(100, _compactH * 0.9), t / 2) : (Math.Max(120, _compactW * 0.85), t, t / 2);
-                double rc = S.DockMode == "Notch" ? Math.Min(_compactH / 2, 12) : Math.Min(_compactW, _compactH) / 2;
-                return (_compactW, _compactH, rc);
+                double b = _hoverBump ? 1 : 0, lt = t + 3 * b;
+                if (AsLine) return IsSide ? (lt, Math.Max(100, _compactH * 0.9) + 10 * b, lt / 2) : (Math.Max(120, _compactW * 0.85) + 10 * b, lt, lt / 2);
+                double cw = _compactW + (IsSide ? 3 : 8) * b, ch = _compactH + (IsSide ? 8 : 3) * b;
+                double rc = S.DockMode == "Notch" ? Math.Min(ch / 2, 12) : Math.Min(cw, ch) / 2;
+                return (cw, ch, rc);
             case IslandState.Expanded:
                 var (pw, ph) = PageSize(_page);
                 return (pw, ph, Attached ? 28 : 38);
@@ -444,12 +477,13 @@ public partial class MainWindow : Window
 
     (double w, double h) PageSize(Page p)
     {
-        bool dots = S.TabNavigationStyle == "Dots" && IsTab(p) && EnabledTabs.Count > 1;
         bool header = p is not (Page.Drop or Page.Tour);
         header = header && S.TabNavigationStyle == "Header";
-        double chrome = (header ? 38 : 16) + 6 + (dots || S.IsPinned ? 15 : 10);
+        bool row = IsTab(p) && S.TabNavigationStyle != "Header"; // bottom row: dots and/or the pin button
+        double chrome = (header ? 38 : 16) + 6 + (row ? 17 : 10);
         return p switch
         {
+            Page.Home => (420, chrome + 64 + (_media.Current.HasMedia ? 64 : 0)),
             Page.Media => (420, chrome + 136 + (LyricsShownInPage ? 62 : 0)),
             Page.Timer => (440, chrome + 118),
             Page.Clipboard => (440, chrome + 290),
@@ -521,23 +555,88 @@ public partial class MainWindow : Window
         _opPopup = Fade(_opPopup, showP, dt);
         bool visible = !(_state == IslandState.Hidden || _fullscreen || (_userHidden && _state == IslandState.Compact));
         _opIsland = Ui.Ease(_opIsland, visible ? 1 : 0, visible ? 14 : 10, dt);
+        _ambientWanted = AmbientWanted();
+        _ambientOp = Ui.Ease(_ambientOp, _ambientWanted ? 1 : 0, _ambientWanted ? 7 : 11, dt);
 
         ApplyFrame();
+        ApplyMotion(now, dt);
 
         bool settled = _w.Settled && _h.Settled && _r.Settled && _pendingW == null && _pendingH == null
                        && Done(_opCompact, showC) && Done(_opExpanded, showE) && Done(_opPopup, showP)
-                       && Math.Abs(_opIsland - (visible ? 1 : 0)) < 0.01;
+                       && Math.Abs(_opIsland - (visible ? 1 : 0)) < 0.01
+                       && Math.Abs(_ambientOp - (_ambientWanted ? 1 : 0)) < 0.01
+                       && now >= _animUntil && Math.Abs(BarWidth - _pbarTarget) < 0.5;
         if (settled)
         {
             _w.Value = _w.Target; _h.Value = _h.Target; _r.Value = _r.Target;
             _opIsland = visible ? 1 : 0;
+            _ambientOp = _ambientWanted ? 1 : 0;
             ApplyFrame();
+            // faded out for a game / fullscreen app: drop the window itself, so even a transparent topmost
+            // overlay can't keep the game out of independent-flip presentation
+            if (_fullscreen && _opIsland == 0 && IsVisible) Hide();
             CompositionTarget.Rendering -= OnRendering;
             _animating = false;
         }
 
         static double Fade(double v, bool on, double dt) => on ? Math.Min(1, v + dt * 7) : Math.Max(0, v - dt * 14);
         static bool Done(double v, bool on) => on ? v >= 1 : v <= 0;
+    }
+
+    /// Keeps the render loop running for a timed animation of `secs` and returns its start time.
+    DateTime Kick(double secs)
+    {
+        var now = DateTime.Now;
+        if (now.AddSeconds(secs) > _animUntil) _animUntil = now.AddSeconds(secs);
+        StartAnimating();
+        return now;
+    }
+
+    static double Prog(DateTime now, DateTime at, double delay, double dur) => Math.Clamp(((now - at).TotalSeconds - delay) / dur, 0, 1);
+
+    double BarWidth => double.IsNaN(PBar.Width) ? 0 : PBar.Width;
+
+    /// Content micro-animations layered on top of the silhouette morph.
+    void ApplyMotion(DateTime now, double dt)
+    {
+        // tab switch: the new page glides in from the side it came from, the active dot stretches into a pill
+        double pg = Ui.OutCubic(Prog(now, _pageInAt, 0, 0.34));
+        PagesShift.X = _pageDir * 30 * (1 - pg);
+        Pages.Opacity = pg;
+        ApplyDots(pg);
+
+        // new song while open: artwork pops, titles glide in from the skip direction
+        double tr = Prog(now, _trackInAt, 0, 0.45);
+        MHeaderShift.X = _trackDir * 20 * (1 - Ui.OutCubic(tr));
+        MHeader.Opacity = Ui.OutCubic(tr);
+        MArtScale.ScaleX = MArtScale.ScaleY = 0.82 + 0.18 * Ui.OutBack(tr);
+
+        double pp = Prog(now, _playPopAt, 0, 0.36);
+        PlayScale.ScaleX = PlayScale.ScaleY = 0.7 + 0.3 * Ui.OutBack(pp);
+
+        // popup entrance, staggered behind the silhouette
+        double a = Prog(now, _popupInAt, 0.04, 0.42), b = Prog(now, _popupInAt, 0.09, 0.38), c = Prog(now, _popupTrailAt, 0.14, 0.4);
+        PLeadScale.ScaleX = PLeadScale.ScaleY = 0.5 + 0.5 * Ui.OutBack(a);
+        PLead.Opacity = Math.Min(1, a * 2.5);
+        PTextsShift.X = 14 * (1 - Ui.OutCubic(b));
+        PTexts.Opacity = b;
+        PTrailScale.ScaleX = PTrailScale.ScaleY = 0.4 + 0.6 * Ui.OutBack(c);
+        PTrail.Opacity = Math.Min(1, c * 2.5);
+
+        // volume HUD bar slides to its level instead of jumping
+        double bw = Ui.Ease(BarWidth, _pbarTarget, 22, dt);
+        PBar.Width = Math.Abs(bw - _pbarTarget) < 0.5 ? _pbarTarget : bw;
+    }
+
+    void ApplyDots(double e)
+    {
+        foreach (Border d in Dots.Children)
+        {
+            var pg = (Page)d.Tag;
+            double on = pg == _page ? e : pg == _prevPage ? 1 - e : 0;
+            d.Width = 6 + 10 * on;
+            d.Opacity = 0.3 + 0.7 * on;
+        }
     }
 
     void ApplyFrame()
@@ -554,16 +653,18 @@ public partial class MainWindow : Window
         _clip.Rect = new Rect(0, 0, w, h);
         _clip.RadiusX = _clip.RadiusY = r;
         _islandRect = new Rect(left, top, w * s, h * s);
-        Shape.Data = BuildShape(left, top, w * s, h * s, r * s);
+        Shape.Data = AmbientShape.Data = BuildShape(left, top, w * s, h * s, r * s);
         Shape.Opacity = Island.Opacity = _opIsland;
+        AmbientShape.Opacity = _ambientOp * _opIsland;
         Island.IsHitTestVisible = _opIsland > 0.5;
 
-        // content layers
+        // content layers: each one fades and grows into place
         Layer(CompactView, _opCompact);
         Layer(PopupView, _opPopup);
         Layer(ExpandedView, _opExpanded);
-        double ease = 1 - Math.Pow(1 - _opExpanded, 3);
-        ExpandedScale.ScaleX = ExpandedScale.ScaleY = 0.94 + 0.06 * ease;
+        ExpandedScale.ScaleX = ExpandedScale.ScaleY = 0.94 + 0.06 * Ui.OutCubic(_opExpanded);
+        CompactScale.ScaleX = CompactScale.ScaleY = 0.9 + 0.1 * Ui.OutCubic(_opCompact);
+        PopupScale.ScaleX = PopupScale.ScaleY = 0.95 + 0.05 * Ui.OutCubic(_opPopup);
 
         var va = S.DockPosition == "Bottom" ? VerticalAlignment.Bottom : IsSide ? VerticalAlignment.Center : VerticalAlignment.Top;
         ExpandedView.VerticalAlignment = va;
@@ -668,6 +769,7 @@ public partial class MainWindow : Window
 
         UpdateTimers(now);
         UpdateMediaClock(now);
+        AnnounceMedia(now);
         UpdateCompact(now, dt, p);
         if (_state == IslandState.Expanded) UpdateExpandedLive(dt);
         if (_state == IslandState.Popup && PWave.Visibility == Visibility.Visible) PWave.Push(_bands, _media.Current.IsPlaying, _spectrum.HasSignal, dt);
@@ -686,7 +788,7 @@ public partial class MainWindow : Window
         if (_ticks % 30 == 0) CheckFullscreen();
         if (_ticks % 60 == 0)
         {
-            Native.SetWindowPos(_hwnd, Native.HWND_TOPMOST, 0, 0, 0, 0, Native.SWP_NOMOVE | Native.SWP_NOSIZE | Native.SWP_NOACTIVATE);
+            if (!_fullscreen) Native.SetWindowPos(_hwnd, Native.HWND_TOPMOST, 0, 0, 0, 0, Native.SWP_NOMOVE | Native.SWP_NOSIZE | Native.SWP_NOACTIVATE);
             if (S.EnablePrivacyIndicator) _privacy = SystemInfo.PrivacyInUse(); else _privacy = default;
         }
         if (_ticks % 45 == 0 && S.IdleWidgetMode == "SystemStats") SystemInfo.SampleStats();
@@ -707,18 +809,21 @@ public partial class MainWindow : Window
     {
         bool over;
         if (_state == IslandState.Expanded)
-            over = Inflate(_islandRect, 14).Contains(p) || _bubbleRect.Contains(p) || Mouse.Captured != null || _dragging || _menuOpen;
+            over = ExpandedHoverRect().Contains(p) || _bubbleRect.Contains(p) || Mouse.Captured != null || _dragging || _menuOpen;
         else
             over = Inflate(_islandRect, 4).Contains(p) || _bubbleRect.Contains(p) || HotRect().Contains(p);
 
         if (over) { _outSince = null; _overSince ??= now; }
         else { _overSince = null; _outSince ??= now; }
+
+        bool bump = over && _state == IslandState.Compact && !_userHidden && !_fullscreen;
+        if (bump != _hoverBump) { _hoverBump = bump; if (_state == IslandState.Compact) Retarget(false); } // other states ignore it; retargeting there would cancel the staggered expand
         double overFor = _overSince.HasValue ? (now - _overSince.Value).TotalSeconds : 0;
         double outFor = _outSince.HasValue ? (now - _outSince.Value).TotalSeconds : 0;
-        double dwell = S.DwellTimeMs / 1000.0;
+        double dwell = S.DwellTimeMs / 1000.0, idleDelay = S.IdleHideDelayMs / 1000.0;
 
         // auto-collapse to thin line when idle
-        bool wantLine = S.AutoHideToEdge && !HasActivity && !over && outFor > 1.5 && _state == IslandState.Compact;
+        bool wantLine = S.AutoHideToEdge && !HasActivity && !over && outFor > idleDelay && _state == IslandState.Compact;
         if (wantLine != _lineMode && (wantLine || over || HasActivity)) { _lineMode = wantLine; Retarget(false); }
 
         if (_suppressHover && !over) _suppressHover = false;
@@ -730,14 +835,23 @@ public partial class MainWindow : Window
                 break;
             case IslandState.Compact:
                 if (over && !_suppressHover && !S.ExpandOnClickOnly && overFor >= dwell) Expand(_bubbleRect.Contains(p) ? Page.Timer : null);
-                else if (!over && S.AutoHideWhenIdle && !HasActivity && outFor > 1.5) { _stealthHidden = true; SetState(IslandState.Hidden); }
+                else if (!over && S.AutoHideWhenIdle && !HasActivity && outFor > idleDelay) { _stealthHidden = true; SetState(IslandState.Hidden); }
                 break;
             case IslandState.Expanded:
+                if (S.IsPinned && S.PinTimeoutSeconds > 0 && !over && outFor >= S.PinTimeoutSeconds)
+                {
+                    TogglePin(); // the pin has expired
+                    Collapse();
+                    break;
+                }
                 bool keep = S.IsPinned || _page == Page.Tour || (IsActive && Keyboard.FocusedElement is TextBox);
-                if (!over && !keep && outFor >= S.GraceTimeMs / 1000.0) Collapse();
+                // a click anywhere else closes it at once, however long "stay open" is set
+                bool clickedAway = !over && (Native.GetAsyncKeyState(0x01) < 0 || Native.GetAsyncKeyState(0x02) < 0);
+                if (!over && !keep && (outFor >= S.GraceTimeMs / 1000.0 || clickedAway)) Collapse();
                 break;
             case IslandState.Popup:
-                if (over && !_suppressHover && !S.ExpandOnClickOnly && overFor >= dwell + 0.35 && _popupPage != null) Expand(_popupPage);
+                // page-less popups (volume, toasts) open the default page; before, hovering one just pinned it on screen
+                if (over && !_suppressHover && !S.ExpandOnClickOnly && overFor >= dwell + 0.35) Expand(_popupPage);
                 else if (now > _popupUntil && !over) EndPopup();
                 break;
         }
@@ -768,11 +882,17 @@ public partial class MainWindow : Window
 
     void CheckFullscreen()
     {
-        _fullscreenRaw = SystemInfo.IsForegroundFullscreen(_hwnd);
-        bool fs = S.AutoHideInFullscreen && _fullscreenRaw;
+        bool game = S.GameMode && SystemInfo.IsFocusAppInFront(S.FocusApps);
+        _fullscreenRaw = game || SystemInfo.IsForegroundFullscreen(_hwnd);
+        bool fs = game || (S.AutoHideInFullscreen && _fullscreenRaw);
         if (fs == _fullscreen) return;
         _fullscreen = fs;
         if (fs && _state != IslandState.Compact) SetState(IslandState.Compact);
+        if (!fs && !IsVisible)
+        {
+            Show(); // ShowActivated=False: comes back without taking focus
+            Native.SetWindowPos(_hwnd, Native.HWND_TOPMOST, 0, 0, 0, 0, Native.SWP_NOMOVE | Native.SWP_NOSIZE | Native.SWP_NOACTIVATE);
+        }
         StartAnimating();
     }
 
@@ -1019,12 +1139,20 @@ public partial class MainWindow : Window
     //  Pages (expanded)
     // =====================================================================================
 
-    void ShowPage(Page p)
+    void ShowPage(Page p, int dir = 0)
     {
         if (IsTab(p) && !EnabledTabs.Contains(p)) p = EnabledTabs[0];
+        if (_state == IslandState.Expanded && p != _page && _opExpanded > 0.5)
+        {
+            var tabs = EnabledTabs;
+            if (dir == 0) dir = tabs.IndexOf(p) >= tabs.IndexOf(_page) ? 1 : -1;
+            _prevPage = _page;
+            _pageDir = dir;
+            _pageInAt = Kick(0.36);
+        }
         _page = p;
         if (IsTab(p)) { int idx = Array.IndexOf(TabOrder, p); if (S.LastActiveTab != idx) { S.LastActiveTab = idx; } }
-        foreach (var (g, pg) in new (Grid, Page)[] { (PageMedia, Page.Media), (PageTimer, Page.Timer), (PageClipboard, Page.Clipboard), (PageApps, Page.Apps), (PageNotes, Page.Notes), (PageOcr, Page.Ocr), (PageDrop, Page.Drop), (PageTour, Page.Tour) })
+        foreach (var (g, pg) in new (Grid, Page)[] { (PageHome, Page.Home), (PageMedia, Page.Media), (PageTimer, Page.Timer), (PageClipboard, Page.Clipboard), (PageApps, Page.Apps), (PageNotes, Page.Notes), (PageOcr, Page.Ocr), (PageDrop, Page.Drop), (PageTour, Page.Tour) })
             g.Visibility = pg == p ? Visibility.Visible : Visibility.Collapsed;
         Header.Visibility = IsTab(p) && S.TabNavigationStyle == "Header" ? Visibility.Visible : Visibility.Collapsed;
         Pages.Margin = new Thickness(18, Header.Visibility == Visibility.Visible ? 2 : 16, 18, 6);
@@ -1034,6 +1162,7 @@ public partial class MainWindow : Window
         UpdateTabChrome();
         switch (p)
         {
+            case Page.Home: RefreshHome(); break;
             case Page.Media: RefreshMediaPage(); break;
             case Page.Timer: RefreshTimerPage(); break;
             case Page.Clipboard: _clipShown = 30; RebuildClips(); break;
@@ -1056,8 +1185,8 @@ public partial class MainWindow : Window
             var btn = new Button { Style = (Style)FindResource("Glyph"), Content = TabGlyph[i], Width = 26, Height = 26, FontSize = 12, ToolTip = TabName[i], Tag = tab, Margin = new Thickness(0, 0, 2, 0) };
             btn.Click += (_, _) => ShowPage(tab);
             TabIcons.Children.Add(btn);
-            var dot = new Ellipse { Width = 6, Height = 6, Margin = new Thickness(3, 0, 3, 0), Tag = tab, Cursor = Cursors.Hand };
-            dot.MouseLeftButtonUp += (_, _) => ShowPage(tab);
+            var dot = new Border { Width = 6, Height = 6, CornerRadius = new CornerRadius(3), Background = Brushes.White, Margin = new Thickness(3, 0, 3, 0), Tag = tab, Cursor = Cursors.Hand };
+            dot.MouseLeftButtonUp += (_, e) => { ShowPage(tab); e.Handled = true; };
             Dots.Children.Add(dot);
         }
         UpdateTabChrome();
@@ -1068,10 +1197,21 @@ public partial class MainWindow : Window
         bool tab = IsTab(_page);
         TabIcons.Visibility = tab && S.TabNavigationStyle == "Header" ? Visibility.Visible : Visibility.Collapsed;
         Dots.Visibility = tab && S.TabNavigationStyle == "Dots" && EnabledTabs.Count > 1 ? Visibility.Visible : Visibility.Collapsed;
-        PinMark.Visibility = S.IsPinned ? Visibility.Visible : Visibility.Collapsed;
-        DotsRow.Visibility = Dots.Visibility == Visibility.Visible || S.IsPinned ? Visibility.Visible : Visibility.Collapsed;
+        // one pin button: in the header for the Header style, beside the dots otherwise
+        bool header = S.TabNavigationStyle == "Header";
+        Panel host = header ? Header : DotsRow;
+        if (PinBtn.Parent != host) { ((Panel)PinBtn.Parent).Children.Remove(PinBtn); host.Children.Add(PinBtn); }
+        PinBtn.HorizontalAlignment = header ? HorizontalAlignment.Right : HorizontalAlignment.Center;
+        PinBtn.Margin = header ? new Thickness(0) : new Thickness(Dots.Visibility == Visibility.Visible ? 6 : 0, 0, 0, 0);
+        PinBtn.Visibility = tab ? Visibility.Visible : Visibility.Collapsed;
+        PinBtn.Content = S.IsPinned ? "" : "";
+        PinBtn.Foreground = S.IsPinned ? Ui.Brush(Orange) : (Brush)FindResource("Tertiary");
+        PinBtn.ToolTip = !S.IsPinned ? "Pin open"
+            : S.PinTimeoutSeconds > 0 ? $"Pinned — closes {(S.PinTimeoutSeconds < 60 ? $"{S.PinTimeoutSeconds} s" : $"{S.PinTimeoutSeconds / 60} min")} after you leave. Click to unpin"
+            : "Pinned open — click to unpin";
+        DotsRow.Visibility = tab && !header ? Visibility.Visible : Visibility.Collapsed;
         foreach (Button b in TabIcons.Children) b.Foreground = (Page)b.Tag == _page ? Brushes.White : (Brush)FindResource("Tertiary");
-        foreach (Ellipse d in Dots.Children) d.Fill = (Page)d.Tag == _page ? Brushes.White : Ui.Brush(Colors.White, 0.3);
+        ApplyDots(Ui.OutCubic(Prog(DateTime.Now, _pageInAt, 0, 0.34)));
     }
 
     void CycleTab(int dir)
@@ -1079,7 +1219,7 @@ public partial class MainWindow : Window
         var tabs = EnabledTabs;
         if (!IsTab(_page) || tabs.Count < 2) return;
         int i = tabs.IndexOf(_page);
-        ShowPage(tabs[(i + dir + tabs.Count) % tabs.Count]);
+        ShowPage(tabs[(i + dir + tabs.Count) % tabs.Count], dir);
     }
 
     DateTime _lastWheelTab;
@@ -1100,17 +1240,84 @@ public partial class MainWindow : Window
     {
         switch (_page)
         {
+            case Page.Home: if (_ticks % 15 == 0) RefreshHome(); break; // clock and chips; twice a second is plenty
             case Page.Media: UpdateMediaLive(dt); break;
             case Page.Timer: UpdateTimerLive(); break;
         }
+    }
+
+    // ----- home (start page) -----
+
+    void RefreshHome()
+    {
+        var now = DateTime.Now;
+        HomeTime.Text = S.Use12HourClock ? now.ToString("h:mm") : now.ToString("HH:mm");
+        HomeDate.Text = now.ToString("dddd, d MMMM");
+
+        string chipsKey = $"{_battery}|{_weather}|{S.WeatherFahrenheit}";
+        if (chipsKey != _homeChipsKey) { _homeChipsKey = chipsKey; BuildHomeChips(); }
+        RefreshHomeMedia();
+    }
+
+    void BuildHomeChips()
+    {
+        HomeChips.Children.Clear();
+        if (_battery.HasBattery)
+        {
+            var b = _battery;
+            var glyph = new BatteryGlyph { Level = b.Percent / 100.0, Charging = b.Charging, VerticalAlignment = VerticalAlignment.Center };
+            HomeChips.Children.Add(Chip(glyph, $"{b.Percent}%", b.Charging ? Green : b.Percent <= 20 ? Red : Colors.White));
+        }
+        if (_weather != null)
+        {
+            double temp = S.WeatherFahrenheit ? _weather.TempC * 9 / 5 + 32 : _weather.TempC;
+            var icon = new TextBlock { Text = SystemInfo.WeatherGlyph(_weather.Code), FontFamily = new FontFamily("Segoe UI Symbol"), FontSize = 14, VerticalAlignment = VerticalAlignment.Center };
+            HomeChips.Children.Add(Chip(icon, $"{temp:0}°", Colors.White));
+        }
+    }
+
+    void RefreshHomeMedia()
+    {
+        var m = _media.Current;
+        HomeResume.Visibility = m.HasMedia ? Visibility.Visible : Visibility.Collapsed;
+        if (m.HasMedia)
+        {
+            HomeTrack.Text = m.Title;
+            HomeArtist.Text = (m.IsPlaying ? "" : "Paused · ") + m.Artist;
+            if (_homeArtFor != m.Art || HomeArt.Background == null)
+            {
+                _homeArtFor = m.Art;
+                HomeArt.Background = m.Art != null ? new ImageBrush(m.Art) { Stretch = Stretch.UniformToFill } : Ui.Brush(Color.FromRgb(0x2C, 0x2C, 0x2E));
+            }
+            var icon = m.IsPlaying ? _homePause : _homePlay;
+            if (HomePlay.Content != icon) HomePlay.Content = icon;
+        }
+        // the resume row comes and goes with the session: keep the island sized to it
+        var (w, h) = PageSize(Page.Home);
+        if (_state == IslandState.Expanded && _page == Page.Home && Math.Abs(ExpandedView.Height - h) > 0.5)
+        {
+            ExpandedView.Width = w; ExpandedView.Height = h;
+            Retarget(false);
+        }
+    }
+
+    Border Chip(UIElement icon, string text, Color color)
+    {
+        var sp = new StackPanel { Orientation = Orientation.Horizontal };
+        sp.Children.Add(icon);
+        sp.Children.Add(new TextBlock { Text = text, FontSize = 13, FontWeight = FontWeights.SemiBold, Foreground = Ui.Brush(color), Margin = new Thickness(7, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center });
+        return new Border { Child = sp, CornerRadius = new CornerRadius(11), Background = Ui.Brush(Color.FromRgb(0x1C, 0x1C, 0x1E)), Padding = new Thickness(10, 5, 11, 5), Margin = new Thickness(0, 3, 0, 3), HorizontalAlignment = HorizontalAlignment.Right };
     }
 
     // ----- media -----
 
     void WireMedia()
     {
-        PlayBtn.Click += (_, _) => { _media.PlayPause(); RefreshMediaPage(); };
-        PrevBtn.Click += (_, _) => _media.Previous();
+        PlayBtn.Click += (_, _) => { _islandPlayClickAt = DateTime.Now; _media.PlayPause(); RefreshMediaPage(); };
+        // Home's resume row: play turns the page over to the player (see OnMediaUpdated); the row itself opens it
+        HomePlay.Click += (_, _) => { _islandPlayClickAt = DateTime.Now; _media.PlayPause(); RefreshHomeMedia(); };
+        HomeResume.MouseLeftButtonUp += (_, e) => { if (EnabledTabs.Contains(Page.Media)) ShowPage(Page.Media, 1); e.Handled = true; };
+        PrevBtn.Click += (_, _) => { _prevClickAt = DateTime.Now; _media.Previous(); };
         NextBtn.Click += (_, _) => _media.Next();
         MArt.MouseLeftButtonUp += (_, e) => { _media.BringPlayerToFront(); e.Handled = true; };
         MBadge.MouseLeftButtonUp += (_, e) => { _media.CycleSession(); e.Handled = true; };
@@ -1138,7 +1345,7 @@ public partial class MainWindow : Window
     void ToggleVolumeRow(bool show)
     {
         MVolumeRow.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
-        MControls.Visibility = show ? Visibility.Hidden : Visibility.Visible;
+        MControls.Visibility = MQuickApps.Visibility = show ? Visibility.Hidden : Visibility.Visible; // the row is see-through over the album glow
         // the slider takes the whole row; only the speaker button stays, turned into a close button
         LyricsBtn.Visibility = show ? Visibility.Collapsed : Visibility.Visible;
         RadarBtn.Visibility = !show && S.EnableMusicRadar ? Visibility.Visible : Visibility.Collapsed;
@@ -1187,9 +1394,48 @@ public partial class MainWindow : Window
             _lyrics = Array.Empty<LyricLine>();
             _lyricsKey = "";
             if (m.HasMedia) _ = EnsureLyrics();
-            if (m.HasMedia && m.IsPlaying && DateTime.Now - _startedAt > TimeSpan.FromSeconds(4)) TrackPopup(m);
+            if (m.HasMedia && _state == IslandState.Expanded && _page == Page.Media)
+            {
+                _trackDir = DateTime.Now - _prevClickAt < TimeSpan.FromSeconds(2) ? -1 : 1;
+                _trackInAt = Kick(0.45);
+            }
         }
+        // the cover often lands a poll or two after the title: refresh a popup that is already showing this song
+        if (_popupKind is "track" or "play" && m.TrackKey == _announcedKey && m.Art != _partFor) { PopupArt(m); PWave.Color = Tint; }
+        if (_state == IslandState.Expanded && _page == Page.Home)
+        {
+            // music just started while the start page is open: focus the player (only on the start, so you can still browse back)
+            if (m.IsPlaying && !_mediaWasPlaying && EnabledTabs.Contains(Page.Media)) ShowPage(Page.Media, 1);
+            else RefreshHomeMedia();
+        }
+        _mediaWasPlaying = m.IsPlaying;
         if (_state == IslandState.Expanded && _page == Page.Media) RefreshMediaPage();
+        else ShowAmbient();
+    }
+
+    /// Announces songs and play/pause by watching the live snapshot (polled from the 30 fps tick).
+    void AnnounceMedia(DateTime now)
+    {
+        var m = _media.Current;
+        if (!m.HasMedia) return;
+        bool quiet = now - _startedAt < TimeSpan.FromSeconds(4); // don't greet whatever was already playing at launch
+        if (m.TrackKey != _announcedKey)
+        {
+            // players often report a new track as paused for a beat (or one that's paused anyway): announce it once it plays
+            if (!m.IsPlaying) return;
+            _announcedKey = m.TrackKey;
+            _announcedPlaying = true;
+            _playFlipSince = null;
+            if (!quiet) TrackPopup(m);
+            return;
+        }
+        if (m.IsPlaying == _announcedPlaying) { _playFlipSince = null; return; }
+        _playFlipSince ??= now;
+        if (now - _playFlipSince.Value < TimeSpan.FromMilliseconds(450)) return; // ride out the play/pause flicker around skips
+        _announcedPlaying = m.IsPlaying;
+        _playFlipSince = null;
+        // pressed in the island itself: the button already showed it
+        if (!quiet && now - _islandPlayClickAt > TimeSpan.FromSeconds(1.5)) PlayStatePopup(m);
     }
 
     async Task EnsureLyrics()
@@ -1237,9 +1483,13 @@ public partial class MainWindow : Window
         MBadge.Background = appIcon != null ? new ImageBrush(appIcon) { Stretch = Stretch.UniformToFill } : Ui.Brush(Color.FromRgb(0x3A, 0x3A, 0x3C));
         MBadgeGlyph.Visibility = appIcon == null ? Visibility.Visible : Visibility.Collapsed;
         MBadge.ToolTip = m.AppName + (_media.SessionCount > 1 ? " — click to switch source" : "");
-        if (m.Art != null) { MArt.Background = new ImageBrush(m.Art) { Stretch = Stretch.UniformToFill }; MArtPlaceholder.Visibility = Visibility.Collapsed; }
-        else { MArt.Background = Ui.Brush(Color.FromRgb(0x2C, 0x2C, 0x2E)); MArtPlaceholder.Visibility = Visibility.Visible; }
-        PlayBtn.Content = m.IsPlaying ? _pauseIcon : _playIcon;
+        if (m.Art != _martFor || MArt.Background == null)
+        {
+            _martFor = m.Art;
+            MArt.Background = m.Art != null ? new ImageBrush(m.Art) { Stretch = Stretch.UniformToFill } : Ui.Brush(Color.FromRgb(0x2C, 0x2C, 0x2E));
+            MArtPlaceholder.Visibility = m.Art != null ? Visibility.Collapsed : Visibility.Visible;
+        }
+        SetPlayIcon(m.IsPlaying);
         PlayBtn.IsEnabled = PrevBtn.IsEnabled = NextBtn.IsEnabled = has;
         MSeek.IsEnabled = has && m.CanSeek;
         MSeek.BarStyle = S.SeekbarStyle;
@@ -1270,7 +1520,7 @@ public partial class MainWindow : Window
             MRemain.Text = "-" + Fmt(m.Duration > pos ? m.Duration - pos : TimeSpan.Zero);
         }
         MSeek.Tick(dt);
-        PlayBtn.Content = m.IsPlaying ? _pauseIcon : _playIcon;
+        SetPlayIcon(m.IsPlaying);
         if (MLyrics.Visibility == Visibility.Visible)
         {
             MLyric0.Text = CurrentLyric(-1);
@@ -1286,6 +1536,14 @@ public partial class MainWindow : Window
         }
     }
 
+    void SetPlayIcon(bool playing)
+    {
+        var icon = playing ? _pauseIcon : _playIcon;
+        if (PlayBtn.Content == icon) return;
+        PlayBtn.Content = icon;
+        if (_state == IslandState.Expanded) _playPopAt = Kick(0.36); // the symbol pops as it swaps, like SF Symbols' replace effect
+    }
+
     static void PulseRing(Ellipse e, double t)
     {
         e.Width = e.Height = 44 + 26 * t;
@@ -1295,21 +1553,29 @@ public partial class MainWindow : Window
     ImageSource _ambientFor;
     BitmapSource _ambientSmall;
 
+    bool AmbientWanted()
+    {
+        var m = _media.Current;
+        return S.EnableMediaBackdrop && m.Art != null && _radarCts == null && _radarMatch == null &&
+               ((_state == IslandState.Expanded && _page == Page.Media) || (_state == IslandState.Popup && _popupKind is "track" or "play"));
+    }
+
+    /// Keeps the glow brush on the current cover; the render loop fades it with the island's state.
     void ShowAmbient()
     {
         var m = _media.Current;
-        bool on = S.EnableMediaBackdrop && m.Art != null &&
-                  ((_state == IslandState.Expanded && _page == Page.Media) || (_state == IslandState.Popup && _popupKind == "track"));
-        if (on && _ambientFor != m.Art)
+        if (m.Art is BitmapSource src && _ambientFor != m.Art)
         {
             _ambientFor = m.Art;
-            var src = (BitmapSource)m.Art;
             _ambientSmall = new TransformedBitmap(src, new ScaleTransform(16.0 / src.PixelWidth, 16.0 / src.PixelHeight));
             _ambientSmall.Freeze();
+            // 0.34 = the old 75% artwork under a 55% black shade, collapsed into one layer
+            var brush = new ImageBrush(_ambientSmall) { Stretch = Stretch.UniformToFill, Opacity = 0.34 };
+            RenderOptions.SetBitmapScalingMode(brush, BitmapScalingMode.HighQuality); // smooth upscale = the blur
+            brush.Freeze();
+            AmbientShape.Fill = brush;
         }
-        Ambient.Source = on ? _ambientSmall : null;
-        Ambient.Opacity = on ? 0.75 : 0;
-        AmbientShade.Opacity = on ? 1 : 0;
+        if (AmbientWanted() != _ambientWanted) StartAnimating();
     }
 
     // ----- music radar -----
@@ -1748,8 +2014,9 @@ public partial class MainWindow : Window
 
     void ResetPopup()
     {
-        foreach (var e in new UIElement[] { PArt, PIconWrap, PLeadText, PBattWrap, PRingWrap, PWave, PTrailText, PBarWrap })
+        foreach (var e in new UIElement[] { PArt, PIconWrap, PLeadText, PBattWrap, PRingWrap, PWave, PTrailText, PBarWrap, PGlyph })
             e.Visibility = Visibility.Collapsed;
+        PArt.Opacity = 1;
         PTexts.Visibility = Visibility.Visible;
         PTitle.Foreground = Brushes.White;
         PSub.Visibility = Visibility.Visible;
@@ -1765,6 +2032,8 @@ public partial class MainWindow : Window
     void ShowPopup(string kind, double height, double seconds, Page? page)
     {
         if (!PopupsAllowed) return;
+        // replay the staggered entrance for a new popup, not for a live one being updated (volume ticks, battery %)
+        if (_state != IslandState.Popup || kind != _popupKind) _popupInAt = _popupTrailAt = Kick(0.6);
         _popupKind = kind;
         PopupView.Visibility = Visibility.Visible;
         PopupView.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
@@ -1804,22 +2073,47 @@ public partial class MainWindow : Window
         ShowPopup("banner", 68, secs, page);
     }
 
+    void PopupArt(MediaSnapshot m)
+    {
+        _partFor = m.Art;
+        PArt.Background = m.Art != null ? new ImageBrush(m.Art) { Stretch = Stretch.UniformToFill } : Ui.Brush(Color.FromRgb(0x2C, 0x2C, 0x2E));
+        PArt.Visibility = Visibility.Visible;
+    }
+
     void TrackPopup(MediaSnapshot m)
     {
         if (!S.EnableTrackPopups || S.SilentDormantMode) return;
-        // Quiet Feed: swallow rapid-fire changes from the same app (Shorts, Reels, autoplay)
-        if (S.QuietFeedMode && m.AppId == _lastTrackPopupApp && DateTime.Now - _lastTrackPopupAt < TimeSpan.FromSeconds(45)) { _lastTrackPopupAt = DateTime.Now; return; }
+        // Quiet Feed: swallow rapid-fire short clips from the same browser (Shorts, Reels, autoplay). Real songs always announce;
+        // before, skipping through a playlist stayed silent because every skip landed inside the 45 s window.
+        bool feedLike = MediaService.IsBrowser(m.AppId) && m.Duration < TimeSpan.FromSeconds(90);
+        if (S.QuietFeedMode && feedLike && m.AppId == _lastTrackPopupApp && DateTime.Now - _lastTrackPopupAt < TimeSpan.FromSeconds(45)) { _lastTrackPopupAt = DateTime.Now; return; }
         _lastTrackPopupApp = m.AppId;
         _lastTrackPopupAt = DateTime.Now;
         ResetPopup();
-        PArt.Background = m.Art != null ? new ImageBrush(m.Art) { Stretch = Stretch.UniformToFill } : Ui.Brush(Color.FromRgb(0x2C, 0x2C, 0x2E));
-        PArt.Visibility = Visibility.Visible;
+        PopupArt(m);
         PTitle.Text = m.Title;
         PSub.Text = m.Artist;
         PWave.Color = Tint;
         PWave.Visibility = Visibility.Visible;
         PopupView.Margin = new Thickness(12, 0, 18, 0);
         ShowPopup("track", 68, 3.5, Page.Media);
+    }
+
+    /// Play / pause from media keys, the player or another device: the song with a popping play or pause symbol.
+    void PlayStatePopup(MediaSnapshot m)
+    {
+        if (!S.EnableTrackPopups || S.SilentDormantMode) return;
+        ResetPopup();
+        PopupArt(m);
+        PArt.Opacity = m.IsPlaying ? 1 : 0.55; // a paused cover dims, as in Apple's Now Playing
+        PTitle.Text = m.Title;
+        PSub.Text = m.IsPlaying ? m.Artist : "Paused";
+        PGlyph.Data = (Geometry)FindResource(m.IsPlaying ? "GPlay" : "GPause");
+        PGlyph.Fill = PGlyph.Stroke = Ui.Brush(Tint);
+        PGlyph.Visibility = Visibility.Visible;
+        PopupView.Margin = new Thickness(12, 0, 22, 0);
+        ShowPopup("play", 68, 2.4, Page.Media);
+        _popupTrailAt = Kick(0.6); // pause → play inside one popup still pops the new symbol
     }
 
     void BatteryPopup(BatteryState b, string label)
@@ -1864,7 +2158,8 @@ public partial class MainWindow : Window
         ResetPopup();
         PLeadText.Text = VolumeGlyph(v, muted); PLeadText.FontFamily = (FontFamily)FindResource("Icons"); PLeadText.FontSize = 15; PLeadText.Visibility = Visibility.Visible;
         PTexts.Visibility = Visibility.Collapsed;
-        PBar.Width = 110 * (muted ? 0 : v);
+        if (_popupKind != "volume") PBar.Width = 0; // a fresh HUD fills up to the level
+        _pbarTarget = 110 * (muted ? 0 : v);
         PBarWrap.Visibility = Visibility.Visible;
         PopupView.Margin = new Thickness(18, 0, 18, 0);
         ShowPopup("volume", 34, 1.5, null);
@@ -1914,15 +2209,8 @@ public partial class MainWindow : Window
                     if (!S.ExpandOnClickOnly || S.ExpandClickMode != "Double" || e.ClickCount >= 2) Expand();
                     e.Handled = true;
                     break;
-                case IslandState.Expanded:
-                    // "Click Pin": clicking empty island space locks it open until clicked again
-                    if (e.OriginalSource == Island && IsTab(_page))
-                    {
-                        S.IsPinned = !S.IsPinned;
-                        AppHost.SaveSettings();
-                        e.Handled = true;
-                    }
-                    break;
+                // Expanded: no hidden gesture here. Clicking empty space used to toggle the pin, and with a short hover
+                // delay the click that was meant to open the capsule landed on the already-open island and pinned it.
                 case IslandState.Popup:
                     if (_popupKind == "banner" && _popupPage == Page.Timer && !_timerActive) { EndPopup(); e.Handled = true; break; }
                     Expand(_popupPage);
@@ -1931,6 +2219,7 @@ public partial class MainWindow : Window
             }
         };
         Bubble.MouseLeftButtonUp += (_, e) => { Expand(Page.Timer); e.Handled = true; };
+        PinBtn.Click += (_, _) => TogglePin();
 
         Island.PreviewMouseWheel += (_, e) =>
         {
@@ -1983,9 +2272,15 @@ public partial class MainWindow : Window
         }
     }
 
+    void TogglePin()
+    {
+        S.IsPinned = !S.IsPinned;
+        AppHost.SaveSettings();
+    }
+
     void BuildIslandMenu() => Island.ContextMenu = Menu(
         ("Settings", () => AppHost.OpenSettings()),
-        (S.IsPinned ? "Unpin Island" : "Pin Island Open", () => { S.IsPinned = !S.IsPinned; AppHost.SaveSettings(); }),
+        (S.IsPinned ? "Unpin Island" : "Pin Island Open", TogglePin),
         ("Floating Lyrics", () => { LyricsWindow.Toggle(); _ = EnsureLyrics(); }),
         (S.EnableMusicRadar ? "Music Radar" : null, () => { Expand(Page.Media); StartRadar(); }),
         ("Hide Island", ToggleUserHidden),

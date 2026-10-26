@@ -14,14 +14,18 @@ public sealed class AppSettings
     public int SideOffsetPercent { get; set; } = 50;
     public bool AutoHideToEdge { get; set; }                   // auto-collapse to thin line strip when idle
     public bool AutoHideWhenIdle { get; set; }                 // stealth: fully hidden until edge hover
+    public int IdleHideDelayMs { get; set; } = 1500;           // idle capsule → thin line / hidden, this long after the pointer leaves
     public string TargetDisplayId { get; set; } = "Primary";   // "Primary" or a screen DeviceName
     public bool FollowCursorDisplay { get; set; }
     public int ThinLineThickness { get; set; } = 3;
     public string ToggleVisibilityHotkey { get; set; } = "Alt+H";
     public bool AutoHideInFullscreen { get; set; } = true;
+    public bool GameMode { get; set; } = true;                 // hide while a game, presentation or FocusApps entry is in front
+    public string FocusApps { get; set; } = "";                // extra process names, comma-separated
 
     // Interaction & physics
     public bool IsPinned { get; set; }
+    public int PinTimeoutSeconds { get; set; }                 // 0 = a pin lasts until unpinned; else expires this long after the pointer leaves
     public bool ExpandOnClickOnly { get; set; }
     public string ExpandClickMode { get; set; } = "Single";    // Single, Double
     public int DwellTimeMs { get; set; } = 120;
@@ -86,6 +90,7 @@ public sealed class AppSettings
 
     // Extras (not in the original)
     public bool TabNotesEnabled { get; set; } = true;
+    public bool TabHomeEnabled { get; set; } = true;           // start page shown when nothing is playing
     public string Notes { get; set; } = "";
     public bool EnableVolumePopup { get; set; } = true;
     public bool EnableLockKeysPopup { get; set; } = true;
@@ -185,6 +190,9 @@ public sealed class AppSettings
         QuickAppPaths ??= new();
         IslandTextScale = Math.Clamp(IslandTextScale <= 0 ? 1 : IslandTextScale, 0.85, 1.3);
         ThinLineThickness = Math.Clamp(ThinLineThickness, 2, 8);
+        IdleHideDelayMs = Math.Clamp(IdleHideDelayMs, 500, 30000);
+        GraceTimeMs = Math.Clamp(GraceTimeMs, 0, 10000);
+        PinTimeoutSeconds = Math.Max(0, PinTimeoutSeconds);
         TopOffset = Math.Clamp(TopOffset, 0, 60);
         SideOffsetPercent = Math.Clamp(SideOffsetPercent, 5, 95);
         ClipboardMaxItems = Math.Clamp(ClipboardMaxItems, 10, 100000);

@@ -178,8 +178,12 @@ public sealed class SettingsWindow : Window
         Sld("Position", "Offsets", "Thin Line Thickness", "Hairline thickness when collapsed to thin strip (2px = ultra discreet, 8px = touch friendly).",
             2, 8, 1, () => S.ThinLineThickness, v => S.ThinLineThickness = (int)v, v => $"{v:0} px");
         Add("Position", "Visibility", "Toggle Island Visibility Hotkey", "Global shortcut to instantly show or hide the Dynamic Island from anywhere.", HotkeyBox);
-        Tog("Position", "Visibility", "Auto-Hide in Fullscreen & Games", "Automatically hides when full-screen apps or games are running to avoid distraction.",
+        Tog("Position", "Visibility", "Auto-Hide in Fullscreen", "Hides when a full-screen app or video covers the island's display.",
             () => S.AutoHideInFullscreen, v => S.AutoHideInFullscreen = v);
+        Tog("Position", "Visibility", "Game Mode", "Stays out of the way while you play: hides, holds popups and disables hover for any game Windows recognises — windowed or full screen — and during presentations.",
+            () => S.GameMode, v => S.GameMode = v);
+        Add("Position", "Visibility", "Focus Apps", "Other apps that should get the same treatment while they're in front (comma-separated, e.g. obs64, zoom).",
+            () => Input(() => S.FocusApps, v => S.FocusApps = v, 240, "e.g. obs64, zoom", out _));
         Tog("Position", "Companion", "Virtual Island Companion (Pet)", "Adds a lively interactive desktop pet walking and sleeping on top of your island dock.",
             () => S.IslandPetEnabled, v => S.IslandPetEnabled = v);
         Seg("Position", "Companion", "Companion Type", "Choose which creature lives on your island.",
@@ -197,12 +201,17 @@ public sealed class SettingsWindow : Window
             () => S.AutoHideWhenIdle, v => S.AutoHideWhenIdle = v);
         Tog("Physics", "Behavior", "Auto-Collapse to Thin Line Strip", "When idle, smoothly shrinks down to an ultra-thin hairline strip.",
             () => S.AutoHideToEdge, v => S.AutoHideToEdge = v);
+        Sld("Physics", "Behavior", "Idle Capsule Hides After", "How long the resting capsule stays after your mouse leaves before it shrinks to a line or hides (uses the two options above).",
+            500, 30000, 500, () => S.IdleHideDelayMs, v => S.IdleHideDelayMs = (int)v, v => $"{v / 1000:0.#} s");
         Tog("Physics", "Behavior", "Expand on Click Only", "Prevents the island from expanding when your mouse hovers over it. Stays collapsed until you explicitly click on it.",
             () => S.ExpandOnClickOnly, v => S.ExpandOnClickOnly = v);
         Seg("Physics", "Behavior", "Click Trigger Mode", "Choose whether a single tap or a quick double-click expands the island.",
             new[] { "Single Click", "Double Click" }, new[] { "Single", "Double" }, () => S.ExpandClickMode, v => S.ExpandClickMode = v);
-        Tog("Physics", "Behavior", "Keep Island Pinned Open", "Locks island permanently open without auto-collapsing on mouse leave.",
+        Tog("Physics", "Behavior", "Keep Island Pinned Open", "Locks the island open after the mouse leaves. The pin button on the open island does the same.",
             () => S.IsPinned, v => S.IsPinned = v);
+        Pick("Physics", "Behavior", "Pin Auto-Release", "How long a pin lasts once your mouse moves away, before the island closes by itself.",
+            new[] { ("Never (stay pinned)", "0"), ("10 seconds", "10"), ("30 seconds", "30"), ("1 minute", "60"), ("5 minutes", "300") },
+            () => S.PinTimeoutSeconds.ToString(CultureInfo.InvariantCulture), v => S.PinTimeoutSeconds = int.Parse(v, CultureInfo.InvariantCulture));
         Tog("Physics", "Popups", "Quiet Feed Mode", "Suppresses repetitive popups for consecutive media from the same app (e.g. YouTube Shorts).",
             () => S.QuietFeedMode, v => S.QuietFeedMode = v);
         Tog("Physics", "Popups", "Silent Dormant Mode", "Completely suppresses auto-flash popups on track change or battery charge.",
@@ -213,8 +222,8 @@ public sealed class SettingsWindow : Window
         Tog("Physics", "Popups", "Launch on Windows Startup", "Start automatically when you log into Windows.", () => S.LaunchOnStartup, v => S.LaunchOnStartup = v);
         Sld("Physics", "Timing", "Hover Dwell Delay", "How long the cursor must linger at screen edge before island expands.",
             0, 1000, 10, () => S.DwellTimeMs, v => S.DwellTimeMs = (int)v, v => $"{v:0} ms");
-        Sld("Physics", "Timing", "Pointer Exit Grace Period", "Delay before retracting when your mouse leaves the island.",
-            0, 2000, 10, () => S.GraceTimeMs, v => S.GraceTimeMs = (int)v, v => $"{v:0} ms");
+        Sld("Physics", "Timing", "Stay Open After Mouse Leaves", "How long the island waits after your mouse leaves before it closes. Clicking anywhere else closes it right away.",
+            0, 10000, 100, () => S.GraceTimeMs, v => S.GraceTimeMs = (int)v, v => v < 1000 ? $"{v:0} ms" : $"{v / 1000:0.#} s");
         Sld("Physics", "Timing", "Edge Hot-Zone Reach", "Active trigger height along screen border that detects summon gestures.",
             2, 40, 1, () => S.HotZoneThickness, v => S.HotZoneThickness = (int)v, v => $"{v:0} px");
         Seg("Physics", "Motion", "Animation Dynamics & Speed", "Silky spring physics profile for dimension transforms.",
@@ -256,6 +265,8 @@ public sealed class SettingsWindow : Window
             new[] { "Modern", "Thin", "Wave" }, new[] { "Modern", "Thin", "Soundwave" }, () => S.SeekbarStyle, v => S.SeekbarStyle = v);
 
         // Island Tabs
+        Tog("Tabs", "Modules", "Home Start Page", "Opens first when nothing is playing: time, date, battery, weather and a one-click resume. Music still opens the player.",
+            () => S.TabHomeEnabled, v => S.TabHomeEnabled = v);
         Tog("Tabs", "Modules", "Universal Media Player Tab", "Controls Spotify, YouTube, Apple Music, browsers, and Windows media sessions.",
             () => S.TabMediaEnabled, v => S.TabMediaEnabled = v);
         Tog("Tabs", "Modules", "Timer & Stopwatch Tab", "Quick access count-down timers and millisecond-accurate stopwatch with lap tracking.",
@@ -320,7 +331,7 @@ public sealed class SettingsWindow : Window
             () => S.EnablePrivacyIndicator, v => S.EnablePrivacyIndicator = v);
         Tog("Extras", "Live Activities", "Battery & Charging Popups", "Show charging, unplugged and low-battery live activities.",
             () => S.EnableBatteryPopups, v => S.EnableBatteryPopups = v);
-        Tog("Extras", "Live Activities", "Track Change Popups", "Briefly expand the island when a new song starts.",
+        Tog("Extras", "Live Activities", "Track & Play/Pause Popups", "Briefly expand the island when a new song starts, or when music pauses or resumes.",
             () => S.EnableTrackPopups, v => S.EnableTrackPopups = v);
         Tog("Extras", "Widgets", "Network Speed in System Stats", "Add live download and upload speed to the System Stats widget.",
             () => S.ShowNetworkSpeed, v => S.ShowNetworkSpeed = v);

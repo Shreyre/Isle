@@ -38,6 +38,12 @@ Extras (not in the original)
 
 Look & footprint
   Typography: SF Pro if installed, otherwise the bundled Inter / Inter Display (SIL OFL, Assets\Fonts) — drawn to match SF.
+  Motion: staggered popup entrances, direction-aware tab slides with pill page dots, song-change and play/pause
+  "pop" animations, springy button presses, a hover swell on the compact island, and an album glow that fills the
+  whole silhouette (notch ears included) and fades with it. Popups announce song changes and play/pause.
+  Home start page: opens when nothing is playing (time, date, battery, weather, one-click resume); music opens the player.
+  Game Mode: hides (window and all), holds popups and disables hover while a game Windows recognises (Game Bar's
+  GameConfigStore list, so windowed/borderless too), exclusive-fullscreen D3D, presentation mode or a listed Focus App is in front.
   Settings window mimics macOS System Settings (traffic lights, toolbar history, pane cards, blue switches);
   Settings > Appearance > "Apple Look" restores the iPhone-style motion and visuals in one click.
   Memory: software rendering (no Direct3D stack), ReadyToRun, non-concurrent GC with ConserveMemory, and an idle

@@ -209,6 +209,62 @@ public static class SystemInfo
         return r.Left <= m.Left && r.Top <= m.Top && r.Right >= m.Right && r.Bottom >= m.Bottom;
     }
 
+    // ---------- Game Mode: an app that wants the screen to itself is in front ----------
+    static HashSet<string> _games;
+    static DateTime _gamesAt;
+    static uint _lastPid;
+    static string _lastApps;
+    static bool _lastHit;
+
+    /// A game Windows recognises (Game Bar's list, so windowed and borderless games count too), exclusive-fullscreen
+    /// Direct3D, presentation mode, or an app from the user's list. Any monitor: they all want undivided attention.
+    public static bool IsFocusAppInFront(string userApps)
+    {
+        if (Native.SHQueryUserNotificationState(out int q) == 0 && q is 3 or 4) return true; // QUNS_RUNNING_D3D_FULL_SCREEN, QUNS_PRESENTATION_MODE
+        Native.GetWindowThreadProcessId(Native.GetForegroundWindow(), out uint pid);
+        if (pid == 0 || pid == Environment.ProcessId) return false;
+        var games = KnownGames();
+        if (pid == _lastPid && userApps == _lastApps) return _lastHit; // checked every second: decide once per foreground process
+        _lastPid = pid;
+        _lastApps = userApps;
+        return _lastHit = IsFocusProcess(pid, userApps, games);
+    }
+
+    static bool IsFocusProcess(uint pid, string userApps, HashSet<string> games)
+    {
+        string path = Native.ProcessPathOf(pid), name;
+        if (path != null) name = Path.GetFileNameWithoutExtension(path);
+        else try { name = System.Diagnostics.Process.GetProcessById((int)pid).ProcessName; } catch { return false; }
+
+        foreach (var raw in (userApps ?? "").Split(',', ';'))
+        {
+            string app = raw.Trim();
+            if (app.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) app = app[..^4];
+            if (app.Length > 0 && app.Equals(name, StringComparison.OrdinalIgnoreCase)) return true;
+        }
+        // no path (access denied): fall back to the exe name
+        return path != null ? games.Contains(path) : games.Any(g => Path.GetFileNameWithoutExtension(g).Equals(name, StringComparison.OrdinalIgnoreCase));
+    }
+
+    static HashSet<string> KnownGames()
+    {
+        if (_games != null && DateTime.UtcNow - _gamesAt < TimeSpan.FromMinutes(2)) return _games;
+        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            using var root = Registry.CurrentUser.OpenSubKey(@"System\GameConfigStore\Children");
+            foreach (var id in root?.GetSubKeyNames() ?? Array.Empty<string>())
+            {
+                using var k = root.OpenSubKey(id);
+                if (k?.GetValue("MatchedExeFullPath") is string p && p.Length > 0) set.Add(p);
+            }
+        }
+        catch { }
+        _gamesAt = DateTime.UtcNow;
+        _lastPid = 0; // Game Bar may have just recognised the running game: decide again
+        return _games = set;
+    }
+
     // ---------- timer chime (synthesised, Apple "Radial"-like triple tone) ----------
     static byte[] _chime;
     public static void PlayChime()

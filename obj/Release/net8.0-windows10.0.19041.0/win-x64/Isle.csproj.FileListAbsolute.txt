@@ -24,3 +24,4 @@ C:\Users\patel\OneDrive\Documents\Dynamic Island Windows\obj\Release\net8.0-wind
 C:\Users\patel\OneDrive\Documents\Dynamic Island Windows\obj\Release\net8.0-windows10.0.19041.0\win-x64\Isle.pdb
 C:\Users\patel\OneDrive\Documents\Dynamic Island Windows\obj\Release\net8.0-windows10.0.19041.0\win-x64\Isle.genruntimeconfig.cache
 C:\Users\patel\OneDrive\Documents\Dynamic Island Windows\obj\Release\net8.0-windows10.0.19041.0\win-x64\ref\Isle.dll
+C:\Users\patel\OneDrive\Documents\Dynamic Island Windows\obj\Release\net8.0-windows10.0.19041.0\win-x64\Isle.sourcelink.json

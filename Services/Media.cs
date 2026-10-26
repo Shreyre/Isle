@@ -14,6 +14,7 @@ public sealed class MediaSnapshot
     public TimeSpan Position, Duration;
     public DateTimeOffset PositionUpdated = DateTimeOffset.Now;
     public ImageSource Art;
+    public ulong ArtHash;   // hash of the thumbnail bytes, to tell a fresh cover from a re-sent stale one
     public Color ArtColor = Colors.White;
     public bool CanSeek;
 
@@ -39,6 +40,7 @@ public sealed class MediaService
     GlobalSystemMediaTransportControlsSessionManager _mgr;
     string _pinnedAppId;   // set when the user cycles sessions with the source badge
     bool _busy;
+    DateTime _trackChangedAt;
     readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromMilliseconds(700) };
 
     public MediaSnapshot Current { get; private set; } = new();
@@ -112,15 +114,19 @@ public sealed class MediaService
                     snap.PositionUpdated = DateTimeOffset.Now;
 
                 bool changed = snap.TrackKey != Current.TrackKey;
-                if (!changed && (Current.Art != null || props?.Thumbnail == null))
+                if (changed) _trackChangedAt = DateTime.UtcNow;
+                // Players often publish the new title before its cover, or re-send the previous song's cover first:
+                // keep re-reading the thumbnail for a few seconds after a change and swap when the bytes differ.
+                bool settling = DateTime.UtcNow - _trackChangedAt < TimeSpan.FromSeconds(4);
+                snap.Art = Current.Art;
+                snap.ArtColor = Current.ArtColor;
+                snap.ArtHash = Current.ArtHash;
+                if (props?.Thumbnail != null && (settling || Current.Art == null))
                 {
-                    snap.Art = Current.Art;
-                    snap.ArtColor = Current.ArtColor;
+                    var (art, color, hash) = await LoadArt(props.Thumbnail, Current.ArtHash);
+                    if (art != null) { snap.Art = art; snap.ArtColor = color; snap.ArtHash = hash; }
                 }
-                else if (props?.Thumbnail != null)
-                {
-                    (snap.Art, snap.ArtColor) = await LoadArt(props.Thumbnail);
-                }
+                else if (changed && props?.Thumbnail == null) { snap.Art = null; snap.ArtHash = 0; }
                 Current = snap;
                 Updated?.Invoke(snap, changed);
             }
@@ -134,7 +140,8 @@ public sealed class MediaService
         finally { _busy = false; }
     }
 
-    static async Task<(ImageSource, Color)> LoadArt(Windows.Storage.Streams.IRandomAccessStreamReference thumb)
+    /// Decodes the cover, unless its bytes hash to `known` (then Art is null: keep the image already decoded).
+    static async Task<(ImageSource, Color, ulong)> LoadArt(Windows.Storage.Streams.IRandomAccessStreamReference thumb, ulong known)
     {
         try
         {
@@ -142,6 +149,10 @@ public sealed class MediaService
             using var net = stream.AsStream();
             var ms = new MemoryStream();
             await net.CopyToAsync(ms);
+            ulong hash = 14695981039346656037; // FNV-1a
+            var buf = ms.GetBuffer();
+            for (int i = 0; i < ms.Length; i++) hash = (hash ^ buf[i]) * 1099511628211;
+            if (hash == known) return (null, Colors.White, hash);
             ms.Position = 0;
             var bmp = new BitmapImage();
             bmp.BeginInit();
@@ -150,9 +161,9 @@ public sealed class MediaService
             bmp.StreamSource = ms;
             bmp.EndInit();
             bmp.Freeze();
-            return (bmp, VibrantColor(bmp));
+            return (bmp, VibrantColor(bmp), hash);
         }
-        catch { return (null, Colors.White); }
+        catch { return (null, Colors.White, 0); }
     }
 
     /// Picks the most vivid reasonably-bright colour in the artwork (what Apple uses for the waveform tint).
@@ -266,12 +277,15 @@ public sealed class MediaService
     }
 
     static readonly Dictionary<string, ImageSource> IconCache = new();
+    static readonly Dictionary<string, DateTime> IconMiss = new();
 
     /// Icon of the app behind a media session (shown as the badge on the album art).
     public static ImageSource AppIcon(string id)
     {
         if (string.IsNullOrEmpty(id)) return null;
         if (IconCache.TryGetValue(id, out var cached)) return cached;
+        // a miss walks the process list; the media page asks on every poll, so retry a miss only every few seconds
+        if (IconMiss.TryGetValue(id, out var missAt) && DateTime.UtcNow - missAt < TimeSpan.FromSeconds(8)) return null;
         ImageSource img = null;
         try
         {
@@ -280,9 +294,12 @@ public sealed class MediaService
             if (path != null) img = IconHelper.Get(path);
         }
         catch { }
-        if (img != null) IconCache[id] = img; // only cache hits; the app may simply not be found yet
+        if (img != null) IconCache[id] = img; // hits are cached for good; the app may simply not be found yet
+        else IconMiss[id] = DateTime.UtcNow;
         return img;
     }
+
+    public static bool IsBrowser(string id) => FriendlyAppName(id) is "Chrome" or "Edge" or "Firefox" or "Brave" or "Opera" or "Vivaldi";
 
     static Process[] SafeProcesses(string name)
     {

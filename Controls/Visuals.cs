@@ -19,6 +19,9 @@ static class Ui
         return b;
     }
     public static double Ease(double current, double target, double rate, double dt) => current + (target - current) * (1 - Math.Exp(-rate * dt));
+    public static double OutCubic(double t) => 1 - Math.Pow(1 - t, 3);
+    /// Overshoots ~8% then settles: the "pop" Apple uses for symbols appearing.
+    public static double OutBack(double t) { const double c = 1.70158; t -= 1; return 1 + (c + 1) * t * t * t + c * t * t; }
 }
 
 /// Apple-style music waveform: rounded vertical bars mirrored around the centre line.
