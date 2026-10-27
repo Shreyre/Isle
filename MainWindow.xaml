@@ -370,9 +370,20 @@
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
-                            <StackPanel VerticalAlignment="Center">
-                                <TextBlock x:Name="HomeTime" FontSize="46" FontWeight="Light" FontFamily="SF Pro Display, ./Assets/Fonts/#Inter Display, ./Assets/Fonts/#Inter" Margin="0,-8,0,-4"/>
-                                <TextBlock x:Name="HomeDate" Style="{StaticResource T2}" FontSize="13.5"/>
+                            <!-- Home Clock Style (ApplyHomeStyle): Digital, Bold, Analog, Dot Matrix or Calendar -->
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <c:AnalogClock x:Name="HomeAnalog" Width="58" Height="58" Margin="0,0,14,0" VerticalAlignment="Center" Visibility="Collapsed"/>
+                                <Border x:Name="HomeCal" Width="58" Height="58" CornerRadius="13" Background="#1C1C1E" Margin="0,0,14,0" VerticalAlignment="Center" Visibility="Collapsed">
+                                    <StackPanel VerticalAlignment="Center">
+                                        <TextBlock x:Name="HomeCalDay" FontSize="10.5" FontWeight="Bold" Foreground="{StaticResource Red}" HorizontalAlignment="Center"/>
+                                        <TextBlock x:Name="HomeCalNum" FontSize="28" FontFamily="SF Pro Display, ./Assets/Fonts/#Inter Display, ./Assets/Fonts/#Inter" HorizontalAlignment="Center" Margin="0,-5,0,-3"/>
+                                    </StackPanel>
+                                </Border>
+                                <StackPanel VerticalAlignment="Center">
+                                    <TextBlock x:Name="HomeTime" FontSize="46" FontWeight="Light" FontFamily="SF Pro Display, ./Assets/Fonts/#Inter Display, ./Assets/Fonts/#Inter" Margin="0,-8,0,-4"><Run x:Name="HomeHour"/><Run x:Name="HomeMin"/></TextBlock>
+                                    <c:DotMatrixText x:Name="HomeDots" Dot="4" HorizontalAlignment="Left" Margin="1,2,0,7" Visibility="Collapsed"/>
+                                    <TextBlock x:Name="HomeDate" Style="{StaticResource T2}" FontSize="13.5"/>
+                                </StackPanel>
                             </StackPanel>
                             <!-- two chips per column; a third starts a new one rather than growing the page -->
                             <WrapPanel x:Name="HomeChips" Grid.Column="1" Orientation="Vertical" MaxHeight="70" VerticalAlignment="Center"/>

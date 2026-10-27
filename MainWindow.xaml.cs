@@ -73,6 +73,7 @@ public partial class MainWindow : Window
     bool _hoverBump; // compact island swells slightly under the pointer
     double _near;    // 0..1 how close the pointer is to the island: idle widgets react to it
     bool _peek; Rect _peekRect; // Ctrl see-through: ghosted and click-through until the pointer leaves _peekRect
+    int _seeVk = 0x11;          // virtual key for S.SeeThroughKey, resolved in ApplySettings
 
     // timed micro-animations, advanced by the render loop until _animUntil
     DateTime _animUntil, _popupInAt, _popupTrailAt, _pageInAt, _trackInAt, _playPopAt;
@@ -109,7 +110,7 @@ public partial class MainWindow : Window
     DateTime? _playFlipSince;
     DateTime _islandPlayClickAt, _prevClickAt;
     ImageSource _partFor, _martFor, _homeArtFor;
-    string _homeChipsKey;
+    string _homeChipsKey, _homeStyle;
     UIElement[] _compactParts;
     readonly HashSet<UIElement> _compactOn = new();
     List<(string Name, int Percent)> _btBatts = new();
@@ -373,6 +374,14 @@ public partial class MainWindow : Window
         if (S.EnableDownloadPopups && _downloads == null) WatchDownloads();
         if (_downloads != null) _downloads.EnableRaisingEvents = S.EnableDownloadPopups;
         BuildTimerPresets();
+        _homeStyle = null; // style or accent may have changed: RefreshHome reapplies
+        // see-through key: side-less modifiers, mouse buttons, else a WPF Key name; anything unparseable falls back to Ctrl
+        _seeVk = S.SeeThroughKey switch
+        {
+            "Ctrl" => 0x11, "Alt" => 0x12, "Shift" => 0x10,
+            "MiddleClick" => 0x04, "XButton1" => 0x05, "XButton2" => 0x06,
+            var k => Enum.TryParse<Key>(k, out var key) && KeyInterop.VirtualKeyFromKey(key) is > 0 and var vk ? vk : 0x11,
+        };
         if (!EnabledTabs.Contains(_page) && IsTab(_page)) _page = EnabledTabs.FirstOrDefault();
         if (_state == IslandState.Expanded) ShowPage(_page);
         Retarget(stagger: false);
@@ -515,7 +524,9 @@ public partial class MainWindow : Window
         double chrome = (header ? 38 : 16) + 6 + (row ? 17 : 10);
         return p switch
         {
-            Page.Home => (420, chrome + 64 + (_media.Current.HasMedia ? 64 : 0)),
+            // the fixed sizes here were tuned against a 17 px bottom row, but with the 18 px pin button it's really 25:
+            // Home is measured, so it needs the true row
+            Page.Home => (420, chrome + (row ? 8 : 0) + HomeHeight()),
             Page.Media => (420, chrome + 136 + (LyricsShownInPage ? 62 : 0)),
             Page.Timer => (440, chrome + 118),
             Page.Clipboard => (440, chrome + 290),
@@ -858,9 +869,9 @@ public partial class MainWindow : Window
         else
             over = Inflate(_islandRect, 4).Contains(p) || _bubbleRect.Contains(p) || HotRect().Contains(p);
 
-        // see-through: Ctrl over the island ghosts it and lets clicks reach what's behind; latched (so the click
-        // itself needn't carry Ctrl) until the pointer leaves the area it covered
-        if (!_peek && over && S.CtrlSeeThrough && Native.GetAsyncKeyState(0x11) < 0 && Mouse.Captured == null && !_dragging && !_menuOpen
+        // see-through: the see-through key (Ctrl by default) over the island ghosts it and lets clicks reach what's behind;
+        // latched (so the click itself needn't carry the key) until the pointer leaves the area it covered
+        if (!_peek && over && S.CtrlSeeThrough && Native.GetAsyncKeyState(_seeVk) < 0 && Mouse.Captured == null && !_dragging && !_menuOpen
             && !(IsActive && Keyboard.FocusedElement is TextBox)) SetPeek(true);
         else if (_peek && !_peekRect.Contains(p)) SetPeek(false);
         if (_peek) over = false;
@@ -1412,7 +1423,9 @@ public partial class MainWindow : Window
     {
         switch (_page)
         {
-            case Page.Home: if (_ticks % 15 == 0) RefreshHome(); break; // clock and chips; twice a second is plenty
+            case Page.Home: // clock and chips; twice a second is plenty (the analog second hand sweeps every frame)
+                if (_ticks % 15 == 0) RefreshHome(); else if (_homeStyle == "Analog") HomeAnalog.Time = DateTime.Now;
+                break;
             case Page.Media: UpdateMediaLive(dt); break;
             case Page.Timer: UpdateTimerLive(); break;
             case Page.Scores: if (DateTime.Now - _scoreListAt > TimeSpan.FromSeconds(60)) _ = LoadScores(); break;
@@ -1424,8 +1437,30 @@ public partial class MainWindow : Window
     void RefreshHome()
     {
         var now = DateTime.Now;
-        HomeTime.Text = S.Use12HourClock ? now.ToString("h:mm") : now.ToString("HH:mm");
-        HomeDate.Text = now.ToString("dddd, d MMMM");
+        if (_homeStyle == null) ApplyHomeStyle();
+        string hour = S.Use12HourClock ? now.ToString("%h") : now.ToString("HH"), min = now.ToString(":mm");
+        switch (_homeStyle)
+        {
+            case "Analog":
+                HomeAnalog.Time = now;
+                HomeHour.Text = now.ToString("dddd"); HomeMin.Text = "";
+                HomeDate.Text = now.ToString("d MMMM");
+                break;
+            case "DotMatrix":
+                HomeDots.Text = hour + min;
+                HomeDate.Text = now.ToString("dddd, d MMMM");
+                break;
+            case "Calendar":
+                HomeCalDay.Text = now.ToString("ddd").ToUpperInvariant();
+                HomeCalNum.Text = now.Day.ToString();
+                HomeHour.Text = hour; HomeMin.Text = min;
+                HomeDate.Text = now.ToString("MMMM yyyy");
+                break;
+            default: // Digital, Bold
+                HomeHour.Text = hour; HomeMin.Text = min;
+                HomeDate.Text = now.ToString("dddd, d MMMM");
+                break;
+        }
 
         // connected Bluetooth batteries: sampled only while Home is on screen, every 30 s (sooner after an audio device change)
         if (now - _btAt > TimeSpan.FromSeconds(30)) { _btAt = now; _ = RefreshBtBatteries(); }
@@ -1433,6 +1468,28 @@ public partial class MainWindow : Window
         string chipsKey = $"{_battery}|{_weather}|{S.WeatherFahrenheit}";
         if (chipsKey != _homeChipsKey) { _homeChipsKey = chipsKey; BuildHomeChips(); }
         RefreshHomeMedia();
+    }
+
+    // runs only when the setting changes; RefreshHome fills in the text
+    void ApplyHomeStyle()
+    {
+        _homeStyle = S.HomeClockStyle;
+        HomeAnalog.Visibility = _homeStyle == "Analog" ? Visibility.Visible : Visibility.Collapsed;
+        HomeCal.Visibility = _homeStyle == "Calendar" ? Visibility.Visible : Visibility.Collapsed;
+        HomeDots.Visibility = _homeStyle == "DotMatrix" ? Visibility.Visible : Visibility.Collapsed;
+        HomeTime.Visibility = _homeStyle == "DotMatrix" ? Visibility.Collapsed : Visibility.Visible;
+        var (size, weight) = _homeStyle switch
+        {
+            "Bold" => (50.0, FontWeights.Bold),
+            "Analog" => (26.0, FontWeights.SemiBold),
+            "Calendar" => (40.0, FontWeights.Light),
+            _ => (46.0, FontWeights.Light),
+        };
+        HomeTime.FontSize = size;
+        HomeTime.FontWeight = weight;
+        HomeTime.Margin = new Thickness(0, -size * 0.17, 0, -size * 0.09); // trims the display font's tall line box
+        // Bold: minutes in the accent, like the Bold idle clock
+        if (_homeStyle == "Bold") HomeMin.Foreground = Ui.Brush(Accent); else HomeMin.ClearValue(System.Windows.Documents.TextElement.ForegroundProperty);
     }
 
     async Task RefreshBtBatteries()
@@ -1483,13 +1540,20 @@ public partial class MainWindow : Window
             var icon = m.IsPlaying ? _homePause : _homePlay;
             if (HomePlay.Content != icon) HomePlay.Content = icon;
         }
-        // the resume row comes and goes with the session: keep the island sized to it
-        var (w, h) = PageSize(Page.Home);
-        if (_state == IslandState.Expanded && _page == Page.Home && Math.Abs(ExpandedView.Height - h) > 0.5)
+        // the resume row and chips come and go: keep the island sized to them
+        // (also while opening: ShowPage sizes the page before RefreshHome has set the chips and this row)
+        if (_page == Page.Home)
         {
-            ExpandedView.Width = w; ExpandedView.Height = h;
-            Retarget(false);
+            var (w, h) = PageSize(Page.Home);
+            if (Math.Abs(ExpandedView.Height - h) > 0.5) { ExpandedView.Width = w; ExpandedView.Height = h; if (_state == IslandState.Expanded) Retarget(false); }
         }
+    }
+
+    // measured, not summed: stacked chips (68 px) outgrew the old fixed 64 px top row and pushed the resume card into the dots
+    double HomeHeight()
+    {
+        PageHome.Measure(new Size(420 - 36, double.PositiveInfinity));
+        return Math.Ceiling(PageHome.DesiredSize.Height);
     }
 
     Border Chip(UIElement icon, string text, Color color)

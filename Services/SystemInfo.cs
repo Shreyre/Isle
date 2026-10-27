@@ -95,7 +95,7 @@ public static class SystemInfo
                 if (sub == null) continue;
                 if (name == "NonPackaged") { var hit = Scan(sub, desktop: true); if (hit.Item1 != null) return hit; continue; }
                 if (sub.GetValue("LastUsedTimeStop") is long stop && stop == 0 && sub.GetValue("LastUsedTimeStart") is long start && start > 0
-                    && (!desktop || Running(name)))
+                    && (!desktop || Running(name, DateTime.FromFileTimeUtc(start).ToLocalTime())))
                     return (AppName(name, desktop), DateTime.FromFileTimeUtc(start).ToLocalTime());
             }
             return default;
@@ -118,12 +118,18 @@ public static class SystemInfo
         }
 
         // a desktop app that quits or crashes mid-call never writes its stop time, so its entry reads "in use"
-        // forever: trust it only while that exe is still running (key names are exe paths with '#' for '\')
-        static bool Running(string key)
+        // forever: trust it only while that exe is running AND was already running when the mic opened. A name
+        // match alone isn't enough: Discord relaunched (or updated into a new app-1.0.x folder) after a crash
+        // revived a 2-year-old entry as a 17652-hour call. Key names are exe paths with '#' for '\'.
+        static bool Running(string key, DateTime since)
         {
-            var ps = System.Diagnostics.Process.GetProcessesByName(Path.GetFileNameWithoutExtension(key.Replace('#', '\\')));
-            foreach (var p in ps) p.Dispose();
-            return ps.Length > 0;
+            bool hit = false;
+            foreach (var p in System.Diagnostics.Process.GetProcessesByName(Path.GetFileNameWithoutExtension(key.Replace('#', '\\'))))
+            {
+                try { hit |= p.StartTime <= since; } catch { hit = true; } // elevated/protected processes hide their start time
+                p.Dispose();
+            }
+            return hit;
         }
     }
 

@@ -27,7 +27,8 @@ public sealed class AppSettings
     public bool IsPinned { get; set; }
     public int PinTimeoutSeconds { get; set; }                 // 0 = a pin lasts until unpinned; else expires this long after the pointer leaves
     public bool ExpandOnClickOnly { get; set; }
-    public bool CtrlSeeThrough { get; set; } = true;           // tap Ctrl over the island: it ghosts and clicks reach what's behind
+    public bool CtrlSeeThrough { get; set; } = true;           // tap SeeThroughKey over the island: it ghosts and clicks reach what's behind
+    public string SeeThroughKey { get; set; } = "Ctrl";        // Ctrl, Alt, Shift (either side), MiddleClick, XButton1/2 (mouse back/forward) or any WPF Key name: "CapsLock", "F8"
     public string ExpandClickMode { get; set; } = "Single";    // Single, Double
     public int DwellTimeMs { get; set; } = 120;
     public int GraceTimeMs { get; set; } = 350;
@@ -69,6 +70,7 @@ public sealed class AppSettings
                                                                // AnalogClock, Calendar, ActivityRings, Network, NextTask, Orb
     public bool Use12HourClock { get; set; } = true;
     public string IdleClockStyle { get; set; } = "Classic";    // Classic, Bold, DotMatrix
+    public string HomeClockStyle { get; set; } = "Digital";    // Digital, Bold, Analog, DotMatrix, Calendar
     public string DropTargetFolderPath { get; set; } = "";
     public List<string> QuickAppPaths { get; set; } = new() { "spotify.exe", "calc.exe", "chrome.exe" };
     public bool ShowQuickApp1InMedia { get; set; } = true;

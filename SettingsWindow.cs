@@ -207,8 +207,10 @@ public sealed class SettingsWindow : Window
             () => S.ExpandOnClickOnly, v => S.ExpandOnClickOnly = v);
         Seg("Physics", "Behavior", "Click Trigger Mode", "Choose whether a single tap or a quick double-click expands the island.",
             new[] { "Single Click", "Double Click" }, new[] { "Single", "Double" }, () => S.ExpandClickMode, v => S.ExpandClickMode = v);
-        Tog("Physics", "Behavior", "Tap Ctrl to See Through", "With the pointer on the island, tap Ctrl: it fades to a ghost and clicks reach whatever is behind it, until you move the pointer away.",
+        Tog("Physics", "Behavior", "Tap a Key to See Through", "With the pointer on the island, tap the see-through key: it fades to a ghost and clicks reach whatever is behind it, until you move the pointer away.",
             () => S.CtrlSeeThrough, v => S.CtrlSeeThrough = v);
+        Add("Physics", "Behavior", "See-Through Key", "Click, then press any key (Ctrl, Caps Lock, F8…) or click the middle or a side mouse button. Keys you type with (letters, Shift) also fire while you type with the pointer resting on the island.",
+            SeeThroughKeyBox);
         Tog("Physics", "Behavior", "Keep Island Pinned Open", "Locks the island open after the mouse leaves. The pin button on the open island does the same.",
             () => S.IsPinned, v => S.IsPinned = v);
         Pick("Physics", "Behavior", "Pin Auto-Release", "How long a pin lasts once your mouse moves away, before the island closes by itself.",
@@ -303,6 +305,8 @@ public sealed class SettingsWindow : Window
             new[] { "12-Hour", "24-Hour" }, new[] { "12", "24" }, () => S.Use12HourClock ? "12" : "24", v => S.Use12HourClock = v == "12");
         Seg("Widgets", "Idle Capsule", "Idle Clock Style", "Classic single-line pill, Bold Notch stacked hero digits, or Nothing OS LED dot matrix.",
             new[] { "Classic", "Bold", "Dot Matrix" }, new[] { "Classic", "Bold", "DotMatrix" }, () => S.IdleClockStyle, v => S.IdleClockStyle = v);
+        Seg("Widgets", "Home Page", "Home Clock Style", "How the Home start page shows the time: light digits, bold digits, a clock face, LED dot matrix, or a Calendar date tile.",
+            new[] { "Digital", "Bold", "Analog", "Dots", "Calendar" }, new[] { "Digital", "Bold", "Analog", "DotMatrix", "Calendar" }, () => S.HomeClockStyle, v => S.HomeClockStyle = v);
         Add("Widgets", "Drop Zone", "Drop Zone Target Folder", "Folder where files dragged and dropped into the island are saved.", DropFolder);
         Add("Widgets", "Quick Launch", "Apps & Folders Quick Shelf", "Assign apps, tools, folders and links to the island. The first three can also appear in the media player.", QuickApps, wide: true);
 
@@ -892,21 +896,70 @@ public sealed class SettingsWindow : Window
 
     // ───────────────────────────── composite rows ─────────────────────────────
 
-    FrameworkElement HotkeyBox()
+    FrameworkElement HotkeyBox() => KeyRecorder(() => Pretty(S.ToggleVisibilityHotkey), "Type shortcut…", "Click, then press a key combination. Esc cancels.", key =>
+    {
+        var mods = new List<string>();
+        var m = Keyboard.Modifiers;
+        if (m.HasFlag(ModifierKeys.Control)) mods.Add("Ctrl");
+        if (m.HasFlag(ModifierKeys.Alt)) mods.Add("Alt");
+        if (m.HasFlag(ModifierKeys.Shift)) mods.Add("Shift");
+        if (m.HasFlag(ModifierKeys.Windows) || Keyboard.IsKeyDown(Key.LWin) || Keyboard.IsKeyDown(Key.RWin)) mods.Add("Win");
+        if (key is Key.LeftCtrl or Key.RightCtrl or Key.LeftAlt or Key.RightAlt or Key.LeftShift or Key.RightShift or Key.LWin or Key.RWin)
+            return mods.Count > 0 ? string.Join(" + ", mods) + " + …" : "Type shortcut…";
+        if (!mods.Any(x => x is "Ctrl" or "Alt" or "Win")) return "Add Ctrl, Alt or Win";
+        S.ToggleVisibilityHotkey = string.Join("+", mods.Append(key.ToString()));
+        return null;
+    });
+
+    // a single key or mouse button, no combination; a modifier is stored side-less so either Ctrl (Alt, Shift) works
+    FrameworkElement SeeThroughKeyBox() => KeyRecorder(() => KeyName(S.SeeThroughKey), "Press a key or click…", "Click, then press any key or a middle / side mouse button. Esc cancels.", key =>
+    {
+        if (key is Key.LWin or Key.RWin) return "Win opens Start";
+        S.SeeThroughKey = key switch
+        {
+            Key.LeftCtrl or Key.RightCtrl => "Ctrl",
+            Key.LeftAlt or Key.RightAlt => "Alt",
+            Key.LeftShift or Key.RightShift => "Shift",
+            _ => key.ToString(),
+        };
+        return null;
+    }, button =>
+    {
+        // left click and right click (its menu) already drive the island
+        if (button is MouseButton.Left or MouseButton.Right) return "Use middle or a side button";
+        S.SeeThroughKey = button == MouseButton.Middle ? "MiddleClick" : button.ToString(); // XButton1 / XButton2
+        return null;
+    });
+
+    static string KeyName(string k) => k switch
+    {
+        "Capital" or "CapsLock" => "Caps Lock", "Scroll" => "Scroll Lock", "Apps" => "Menu", "Oem3" => "`",
+        "MiddleClick" => "Middle Click", "XButton1" => "Mouse Back", "XButton2" => "Mouse Forward", _ => k,
+    };
+
+    /// Click to record, Esc cancels. `press` (and `click`, for mouse buttons) saves and returns null, or returns a hint and keeps recording.
+    FrameworkElement KeyRecorder(Func<string> current, string prompt, string tip, Func<Key, string> press, Func<MouseButton, string> click = null)
     {
         var t = T("", 13, _label, FontWeights.SemiBold);
         var box = new Border
         {
             CornerRadius = new CornerRadius(6), Background = _inputBg, BorderBrush = _inputBorder, BorderThickness = new Thickness(1),
             Padding = new Thickness(10, 4, 10, 4), MinWidth = 130, Child = t, Cursor = Cursors.Hand, Focusable = true, FocusVisualStyle = null,
-            ToolTip = "Click, then press a key combination. Esc cancels.", HorizontalAlignment = HorizontalAlignment.Right,
+            ToolTip = tip, HorizontalAlignment = HorizontalAlignment.Right,
         };
         bool rec = false;
         void Show()
         {
-            t.Text = rec ? "Type shortcut…" : Pretty(S.ToggleVisibilityHotkey);
+            t.Text = rec ? prompt : current();
             t.Foreground = rec ? _sec : _label;
             box.BorderBrush = rec ? _accent : _inputBorder;
+        }
+        void Done(string hint)
+        {
+            if (hint != null) { t.Text = hint; return; }
+            rec = false;
+            Changed();
+            Show();
         }
         box.MouseLeftButtonUp += (_, e) => { rec = true; box.Focus(); Keyboard.Focus(box); Show(); e.Handled = true; };
         box.LostKeyboardFocus += (_, _) => { rec = false; Show(); };
@@ -916,23 +969,15 @@ public sealed class SettingsWindow : Window
             e.Handled = true;
             var key = e.Key == Key.System ? e.SystemKey : e.Key;
             if (key == Key.Escape) { rec = false; Show(); return; }
-            var mods = new List<string>();
-            var m = Keyboard.Modifiers;
-            if (m.HasFlag(ModifierKeys.Control)) mods.Add("Ctrl");
-            if (m.HasFlag(ModifierKeys.Alt)) mods.Add("Alt");
-            if (m.HasFlag(ModifierKeys.Shift)) mods.Add("Shift");
-            if (m.HasFlag(ModifierKeys.Windows) || Keyboard.IsKeyDown(Key.LWin) || Keyboard.IsKeyDown(Key.RWin)) mods.Add("Win");
-            if (key is Key.LeftCtrl or Key.RightCtrl or Key.LeftAlt or Key.RightAlt or Key.LeftShift or Key.RightShift or Key.LWin or Key.RWin)
-            {
-                t.Text = mods.Count > 0 ? string.Join(" + ", mods) + " + …" : "Type shortcut…";
-                return;
-            }
-            if (!mods.Any(x => x is "Ctrl" or "Alt" or "Win")) { t.Text = "Add Ctrl, Alt or Win"; return; }
-            S.ToggleVisibilityHotkey = string.Join("+", mods.Append(key.ToString()));
-            rec = false;
-            Changed();
-            Show();
+            Done(press(key));
         };
+        if (click != null)
+            box.PreviewMouseDown += (_, e) =>
+            {
+                if (!rec || e.ChangedButton == MouseButton.Left) return; // a left click on the box just keeps it recording
+                e.Handled = true;
+                Done(click(e.ChangedButton));
+            };
         Show();
         Reg(Show);
         return box;

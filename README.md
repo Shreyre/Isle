@@ -79,7 +79,7 @@ Needs Windows 10 (version 1809 or later) or Windows 11.
 | Keep it open | Click the pin in the top-right corner |
 | Open the music app | Click the album art |
 | Switch between players | Click the small app badge on the album art |
-| See through it | Tap **Ctrl** over the island: it fades and your clicks reach the window behind until you move away |
+| See through it | Tap **Ctrl** over the island: it fades and your clicks reach the window behind until you move away. Set any key (Caps Lock, F8, …) or the middle / side mouse button under See-Through Key in Settings → Interaction & Physics |
 | Hide or show it | Press **Alt + H**, or shake the mouse quickly from side to side |
 | Settings, Quit, Floating Lyrics | Right-click the island, use the tray icon, or launch Isle again |
 
