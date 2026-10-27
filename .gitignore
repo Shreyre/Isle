@@ -1,0 +1,6 @@
+# The self-contained Isle.exe is ~167 MB, over GitHub's 100 MB file limit: it ships inside publish/Isle.zip
+publish/Isle.exe
+# the .NET runtime a self-contained publish copies here (Isle's own files in it stay tracked)
+bin/Release/net8.0-windows10.0.19041.0/win-x64/
+# 9 MB intermediate host for the self-contained single file
+obj/**/singlefilehost.exe

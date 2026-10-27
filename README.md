@@ -58,9 +58,13 @@ When two things run at once (say a pinned match and music), the second moves int
 
 ## Install
 
-1. Install the **[.NET 8 Desktop Runtime (x64)](https://dotnet.microsoft.com/download/dotnet/8.0)** if you don't already have it.
-2. Download **`Isle.exe`** from the [`publish`](publish) folder.
-3. Run it. If Windows SmartScreen warns you about an unrecognised app, choose **More info → Run anyway**.
+Nothing else to install: everything Isle needs is inside the one file.
+
+1. Download **[`Isle.zip`](publish/Isle.zip)** (66 MB).
+2. Right-click it, choose **Extract All**, and put `Isle.exe` somewhere it can stay, for example `Documents\Isle`.
+3. Double-click `Isle.exe`. If Windows SmartScreen warns you about an unrecognised app, choose **More info → Run anyway**.
+
+Extract it rather than running it from inside the zip: Isle remembers where it lives so it can start with Windows.
 
 A short welcome tour shows you around on first launch. Isle starts with Windows from then on; you can turn that off in **Settings → Interaction & Physics → Launch on Windows Startup**.
 
@@ -116,8 +120,16 @@ Needs the [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0).
 
 ```
 dotnet build
-dotnet publish -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -o publish
 ```
+
+To ship: a self-contained single file (the .NET runtime is bundled, so users install nothing), zipped. The exe itself is ~167 MB, over GitHub's 100 MB file limit, so only the zip is committed.
+
+```
+dotnet publish -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o publish
+Compress-Archive publish\Isle.exe publish\Isle.zip -CompressionLevel Optimal -Force
+```
+
+Don't add `EnableCompressionInSingleFile`: it shrinks the exe to 71 MB but costs ~10 MB more RAM, since compressed assemblies are unpacked into memory.
 
 | Path | What's there |
 |---|---|
