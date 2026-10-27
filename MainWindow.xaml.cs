@@ -2664,35 +2664,34 @@ public partial class MainWindow : Window
         bool pinned = m.Id == S.PinnedMatchId;
         var dim = (Brush)FindResource("Secondary");
         var g = new Grid();
-        g.ColumnDefinitions.Add(new ColumnDefinition());                              // team
+        // the overs get the leftover width (and give way first), so "6.6/20 ov, target 199" never squeezes the team name
+        g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });    // team
+        g.ColumnDefinitions.Add(new ColumnDefinition());                              // overs
         g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });    // score
         g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(86) }); // status
         g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(16) }); // pin
         for (int i = 0; i < 3; i++) g.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
-        void Add(UIElement e, int row, int col, int span = 1)
+        void Add(UIElement e, int row, int col, int rows = 1, int cols = 1)
         {
-            Grid.SetRow(e, row); Grid.SetColumn(e, col);
-            if (span > 1) { if (col >= 2) Grid.SetRowSpan(e, span); else Grid.SetColumnSpan(e, span); }
+            Grid.SetRow(e, row); Grid.SetColumn(e, col); Grid.SetRowSpan(e, rows); Grid.SetColumnSpan(e, cols);
             g.Children.Add(e);
         }
         void Team(Side s, Side other, int row)
         {
             var fg = other.Winner ? dim : Brushes.White; // a decided result greys the loser out
             // runs inside one TextBlock, not nested panels: 40 cards' element count is most of this page's memory
-            var name = new TextBlock { Text = s.Name.Length > 0 ? s.Name : s.Abbr, FontSize = 13.5, FontWeight = FontWeights.SemiBold, Foreground = fg, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
+            var name = new TextBlock { Text = s.Name.Length > 0 ? s.Name : s.Abbr, FontSize = 13.5, FontWeight = FontWeights.SemiBold, Foreground = fg, MaxWidth = 160, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
             if (s.Batting && m.Live) name.Inlines.Add(new Run(" •") { Foreground = dim }); // at the crease
             Add(name, row, 0);
-
-            var score = new TextBlock { HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10, 1, 0, 1) };
-            if (s.Note.Length > 0) score.Inlines.Add(new Run(s.Note + "  ") { FontSize = 11, Foreground = dim });
-            score.Inlines.Add(new Run(s.Main) { FontFamily = Ui.Display, FontSize = 15, FontWeight = FontWeights.Bold, Foreground = fg });
-            Add(score, row, 1);
+            if (s.Note.Length > 0)
+                Add(new TextBlock { Text = s.Note, FontSize = 11, Foreground = dim, TextTrimming = TextTrimming.CharacterEllipsis, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(8, 1, 6, 0) }, row, 1);
+            Add(new TextBlock { Text = s.Main, FontFamily = Ui.Display, FontSize = 15, FontWeight = FontWeights.Bold, Foreground = fg, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 1, 0, 1) }, row, 2);
         }
         Team(m.A, m.B, 0);
         Team(m.B, m.A, 1);
         if (m.Detail.Length > 0 && m.State != "pre") // "Nagaland lead by 12 runs"; before the start it only repeats the time
-            Add(new TextBlock { Text = m.Detail, FontSize = 11.5, Foreground = dim, TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(0, 3, 0, 0) }, 2, 0, 2);
+            Add(new TextBlock { Text = m.Detail, FontSize = 11.5, Foreground = dim, TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(0, 3, 0, 0) }, 2, 0, cols: 3);
 
         var st = new TextBlock
         {
@@ -2704,14 +2703,14 @@ public partial class MainWindow : Window
             st.Inlines.Add(new System.Windows.Documents.LineBreak());
             st.Inlines.Add(new Run(Day(m.Start)) { FontSize = 11, FontWeight = FontWeights.Normal, Foreground = dim });
         }
-        Add(new Border { BorderBrush = Hairline, BorderThickness = new Thickness(1, 0, 0, 0), Margin = new Thickness(12, 2, 0, 2), Padding = new Thickness(6, 0, 0, 0), Child = st }, 0, 2, 3);
+        Add(new Border { BorderBrush = Hairline, BorderThickness = new Thickness(1, 0, 0, 0), Margin = new Thickness(12, 2, 0, 2), Padding = new Thickness(6, 0, 0, 0), Child = st }, 0, 3, rows: 3);
 
         var pin = new TextBlock
         {
             Text = pinned ? "" : "", FontFamily = Ui.Icons, FontSize = 11, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center,
             Foreground = pinned ? Ui.Brush(Orange) : (Brush)FindResource("Tertiary"), Opacity = pinned ? 1 : 0,
         };
-        Add(pin, 0, 3, 3);
+        Add(pin, 0, 4, rows: 3);
 
         var card = new Border
         {
@@ -2739,9 +2738,9 @@ public partial class MainWindow : Window
         CScoreB.Inlines.Clear();
         CScoreB.Inlines.Add(Score(m.B, m.A));
         CScoreB.Inlines.Add(new Run((m.B.Main.Length > 0 ? " " : "") + m.B.Abbr) { Foreground = dim });
-        // live cricket only says "Live": the batting side's overs say more
+        // live cricket only says "Live": the batting side's overs say more ("6.5/20 ov"; the target is on the page)
         var bat = m.A.Batting ? m.A : m.B.Batting ? m.B : null;
-        CScoreStatus.Text = m.Live && m.Summary == "Live" && bat?.Note.Length > 0 ? bat.Note
+        CScoreStatus.Text = m.Live && m.Summary == "Live" && bat?.Note.Length > 0 ? bat.Note.Split(", ")[0]
             : m.State == "pre" && m.Start != default && m.Start.Date != DateTime.Today ? m.Start.ToString("ddd ") + ScoreStatus(m) : ScoreStatus(m);
         CScoreStatus.Foreground = m.Live ? Ui.Brush(Red) : dim;
     }
