@@ -139,33 +139,6 @@
             </Setter>
         </Style>
 
-        <!-- Chip / segment (checked = white capsule with black label) -->
-        <Style x:Key="Chip" TargetType="RadioButton">
-            <Setter Property="Foreground" Value="#CCFFFFFF"/>
-            <Setter Property="FontSize" Value="11.5"/>
-            <Setter Property="FontWeight" Value="SemiBold"/>
-            <Setter Property="Padding" Value="10,4"/>
-            <Setter Property="Margin" Value="0,0,4,0"/>
-            <Setter Property="Cursor" Value="Hand"/>
-            <Setter Property="Focusable" Value="False"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="RadioButton">
-                        <Border x:Name="b" CornerRadius="999" Background="#262628" Padding="{TemplateBinding Padding}">
-                            <ContentPresenter x:Name="cp" HorizontalAlignment="Center" VerticalAlignment="Center" TextElement.Foreground="{TemplateBinding Foreground}"/>
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="b" Property="Background" Value="#38383A"/></Trigger>
-                            <Trigger Property="IsChecked" Value="True">
-                                <Setter TargetName="b" Property="Background" Value="White"/>
-                                <Setter TargetName="cp" Property="TextElement.Foreground" Value="Black"/>
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-
         <!-- iOS segmented control segment: sits in a rounded track, the checked one is a raised grey tile -->
         <Style x:Key="Segment" TargetType="RadioButton">
             <Setter Property="Foreground" Value="#B3FFFFFF"/>
@@ -546,11 +519,13 @@
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="*"/>
                         </Grid.RowDefinitions>
-                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Left">
-                            <RadioButton x:Name="SegTimer" Style="{StaticResource Chip}" GroupName="seg" Content="Timer" IsChecked="True"/>
-                            <RadioButton x:Name="SegStopwatch" Style="{StaticResource Chip}" GroupName="seg" Content="Stopwatch"/>
-                            <RadioButton x:Name="SegFocus" Style="{StaticResource Chip}" GroupName="seg" Content="Focus"/>
-                        </StackPanel>
+                        <Border CornerRadius="9" Background="#1C1C1E" Padding="2">
+                            <UniformGrid Rows="1">
+                                <RadioButton x:Name="SegTimer" Style="{StaticResource Segment}" GroupName="seg" Content="Timer" IsChecked="True"/>
+                                <RadioButton x:Name="SegStopwatch" Style="{StaticResource Segment}" GroupName="seg" Content="Stopwatch"/>
+                                <RadioButton x:Name="SegFocus" Style="{StaticResource Segment}" GroupName="seg" Content="Focus"/>
+                            </UniformGrid>
+                        </Border>
 
                         <!-- timer: setup -->
                         <Grid x:Name="TimerSetup" Grid.Row="1" Margin="0,12,0,0">
@@ -621,13 +596,15 @@
                             <TextBlock x:Name="ClipSearchHint" Text="Search clips" Foreground="{StaticResource Tertiary}" VerticalAlignment="Center" Margin="31,0,0,0" IsHitTestVisible="False"/>
                         </Grid>
                         <Grid Grid.Row="1" Margin="0,8,0,6">
-                            <StackPanel Orientation="Horizontal">
-                                <RadioButton x:Name="FAll" Style="{StaticResource Chip}" GroupName="cf" Content="All" IsChecked="True"/>
-                                <RadioButton x:Name="FImages" Style="{StaticResource Chip}" GroupName="cf" Content="Images"/>
-                                <RadioButton x:Name="FUrls" Style="{StaticResource Chip}" GroupName="cf" Content="Links"/>
-                                <RadioButton x:Name="FText" Style="{StaticResource Chip}" GroupName="cf" Content="Text"/>
-                                <RadioButton x:Name="FPinned" Style="{StaticResource Chip}" GroupName="cf" Content="Pinned"/>
-                            </StackPanel>
+                            <Border CornerRadius="9" Background="#1C1C1E" Padding="2" Margin="0,0,34,0">
+                                <UniformGrid Rows="1">
+                                    <RadioButton x:Name="FAll" Style="{StaticResource Segment}" GroupName="cf" Content="All" IsChecked="True"/>
+                                    <RadioButton x:Name="FImages" Style="{StaticResource Segment}" GroupName="cf" Content="Images"/>
+                                    <RadioButton x:Name="FUrls" Style="{StaticResource Segment}" GroupName="cf" Content="Links"/>
+                                    <RadioButton x:Name="FText" Style="{StaticResource Segment}" GroupName="cf" Content="Text"/>
+                                    <RadioButton x:Name="FPinned" Style="{StaticResource Segment}" GroupName="cf" Content="Pinned"/>
+                                </UniformGrid>
+                            </Border>
                             <Button x:Name="ClipClear" Style="{StaticResource Glyph}" Width="26" Height="26" FontSize="12" Content="&#xE74D;" HorizontalAlignment="Right" ToolTip="Clear unpinned clips" Foreground="{StaticResource Secondary}"/>
                         </Grid>
                         <ScrollViewer x:Name="ClipScroll" Grid.Row="2" VerticalScrollBarVisibility="Auto">
