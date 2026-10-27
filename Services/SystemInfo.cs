@@ -11,7 +11,7 @@ public readonly record struct BatteryState(bool HasBattery, int Percent, bool Pl
 
 public static class SystemInfo
 {
-    static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(8) };
+    internal static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(8) };
     static SystemInfo() => Http.DefaultRequestHeaders.UserAgent.ParseAdd("Isle/1.0");
 
     // ---------- battery ----------
@@ -69,29 +69,52 @@ public static class SystemInfo
         bps >= 1 << 20 ? $"{bps / (1 << 20):0.0} MB/s" : bps >= 1024 ? $"{bps / 1024:0} KB/s" : $"{bps:0} B/s";
 
     // ---------- camera / microphone in use (privacy indicator) ----------
-    public static (bool Mic, bool Cam) PrivacyInUse() => (InUse("microphone"), InUse("webcam"));
+    static string _micKey, _micName;
 
-    static bool InUse(string capability)
+    /// Mic / camera in use, plus which app holds the mic and since when (the call live activity).
+    public static (bool Mic, bool Cam, string MicApp, DateTime MicSince) PrivacyInUse()
+    {
+        var (app, since) = InUse("microphone");
+        return (app != null, InUse("webcam").App != null, app, since);
+    }
+
+    static (string App, DateTime Since) InUse(string capability)
     {
         try
         {
             using var root = Registry.CurrentUser.OpenSubKey(@"Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\" + capability);
-            return root != null && Scan(root, desktop: false);
+            return root != null ? Scan(root, desktop: false) : default;
         }
-        catch { return false; }
+        catch { return default; }
 
-        static bool Scan(RegistryKey key, bool desktop)
+        static (string, DateTime) Scan(RegistryKey key, bool desktop)
         {
             foreach (var name in key.GetSubKeyNames())
             {
                 using var sub = key.OpenSubKey(name);
                 if (sub == null) continue;
-                if (name == "NonPackaged") { if (Scan(sub, desktop: true)) return true; continue; }
+                if (name == "NonPackaged") { var hit = Scan(sub, desktop: true); if (hit.Item1 != null) return hit; continue; }
                 if (sub.GetValue("LastUsedTimeStop") is long stop && stop == 0 && sub.GetValue("LastUsedTimeStart") is long start && start > 0
                     && (!desktop || Running(name)))
-                    return true;
+                    return (AppName(name, desktop), DateTime.FromFileTimeUtc(start).ToLocalTime());
             }
-            return false;
+            return default;
+        }
+
+        // desktop keys are exe paths ("C:#…#Discord.exe"); packaged ones are family names ("5319275A.WhatsAppDesktop_cv1g1gvanyjgm")
+        static string AppName(string key, bool desktop)
+        {
+            if (key == _micKey) return _micName; // sampled every 2 s: read the exe's version info once per app
+            _micKey = key;
+            if (desktop)
+            {
+                string path = key.Replace('#', '\\');
+                try { if (System.Diagnostics.FileVersionInfo.GetVersionInfo(path).FileDescription is { Length: > 0 } d) return _micName = d; } catch { }
+                return _micName = Path.GetFileNameWithoutExtension(path);
+            }
+            string n = key.Split('_')[0];
+            n = n[(n.LastIndexOf('.') + 1)..];
+            return _micName = n.EndsWith("Desktop") ? n[..^7] : n.StartsWith("MS") && n.Length > 2 ? n[2..] : n; // WhatsAppDesktop → WhatsApp, MSTeams → Teams
         }
 
         // a desktop app that quits or crashes mid-call never writes its stop time, so its entry reads "in use"
@@ -148,30 +171,48 @@ public static class SystemInfo
         _ => "☁",
     };
 
-    // ---------- Bluetooth battery for a connected audio device ----------
-    public static async Task<int?> BluetoothBatteryAsync(string endpointName)
+    // ---------- Bluetooth battery ----------
+    /// Every connected Bluetooth device that reports a battery level. Windows keeps the last level on a device after
+    /// it disconnects, so only devices whose Dev_ node says connected count; the level itself often sits on a child
+    /// node (Hands-Free) that carries the same address.
+    public static async Task<List<(string Name, int Percent)>> BluetoothBatteriesAsync()
     {
+        var list = new List<(string, int)>();
         try
         {
-            // "Headphones (AirPods Pro)" → "AirPods Pro"
-            string name = endpointName;
-            int a = name.IndexOf('('), b = name.LastIndexOf(')');
-            if (a >= 0 && b > a) name = name[(a + 1)..b];
-            name = name.Replace(" Stereo", "").Replace(" Hands-Free AG Audio", "").Replace(" Hands-Free", "").Trim();
-            const string battKey = "{104EA319-6EE2-4701-BD47-8DDBF425BBE5} 2";
+            const string battKey = "{104EA319-6EE2-4701-BD47-8DDBF425BBE5} 2", connKey = "{83DA6326-97A6-4088-9453-A1923F573B29} 15";
             var devs = await Windows.Devices.Enumeration.Pnp.PnpObject.FindAllAsync(
                 Windows.Devices.Enumeration.Pnp.PnpObjectType.Device,
-                new[] { "System.ItemNameDisplay", battKey },
-                "System.Devices.DeviceInstanceId:~~\"BTHENUM\"");
+                new[] { "System.ItemNameDisplay", battKey, connKey },
+                "System.Devices.DeviceInstanceId:~<\"BTH\"");
             foreach (var d in devs)
             {
-                if (d.Properties.TryGetValue(battKey, out var v) && v is byte level &&
-                    d.Properties.TryGetValue("System.ItemNameDisplay", out var n) && n is string dn &&
-                    (dn.Contains(name, StringComparison.OrdinalIgnoreCase) || name.Contains(dn, StringComparison.OrdinalIgnoreCase)))
-                    return level;
+                // BTHENUM\Dev_1406A7A22F66\… (classic) or BTHLE\Dev_ac8ebd3e1489\… (LE)
+                int at = d.Id.IndexOf("\\Dev_", StringComparison.OrdinalIgnoreCase);
+                if (at < 0 || d.Id.Length < at + 17 || !(d.Properties.TryGetValue(connKey, out var c) && c is true)) continue;
+                string addr = d.Id.Substring(at + 5, 12);
+                foreach (var x in devs)
+                    if (x.Properties.TryGetValue(battKey, out var v) && v is byte level && x.Id.Contains(addr, StringComparison.OrdinalIgnoreCase))
+                    {
+                        list.Add((d.Properties.TryGetValue("System.ItemNameDisplay", out var n) && n is string dn ? dn : "Bluetooth", level));
+                        break;
+                    }
             }
         }
         catch (Exception ex) { AppHost.Log("BT battery: " + ex.Message); }
+        return list;
+    }
+
+    /// Battery of the connected Bluetooth device behind an audio endpoint, e.g. "Headphones (AirPods Pro)".
+    public static async Task<int?> BluetoothBatteryAsync(string endpointName)
+    {
+        string name = endpointName;
+        int a = name.IndexOf('('), b = name.LastIndexOf(')');
+        if (a >= 0 && b > a) name = name[(a + 1)..b];
+        name = name.Replace(" Stereo", "").Replace(" Hands-Free AG Audio", "").Replace(" Hands-Free", "").Trim();
+        foreach (var (dn, level) in await BluetoothBatteriesAsync())
+            if (dn.Contains(name, StringComparison.OrdinalIgnoreCase) || name.Contains(dn, StringComparison.OrdinalIgnoreCase))
+                return level;
         return null;
     }
 

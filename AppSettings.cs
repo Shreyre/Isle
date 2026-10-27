@@ -105,6 +105,13 @@ public sealed class AppSettings
     public bool ShowNetworkSpeed { get; set; } = true;
     public string WeatherCity { get; set; } = "";              // empty = locate by IP
     public bool WeatherFahrenheit { get; set; }
+    public bool TabScoresEnabled { get; set; } = true;         // live scores; click a match to pin it as a live activity
+    public string ScoresSport { get; set; } = "Cricket";       // the selected chip
+    public string PinnedMatchId { get; set; } = "";
+    public string PinnedMatchQuery { get; set; } = "";         // league query that re-reads the pinned match
+    public bool EnableScorePopups { get; set; } = true;        // goals, wickets, kick-off, full time
+    public bool EnableCallActivity { get; set; } = true;       // green pill with the app and call timer while the mic is in use
+    public bool EnableDownloadPopups { get; set; } = true;     // banner when a browser download finishes
     public int PomodoroFocusMinutes { get; set; } = 25;
     public int PomodoroBreakMinutes { get; set; } = 5;
 

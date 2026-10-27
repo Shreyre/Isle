@@ -281,6 +281,8 @@ public sealed class SettingsWindow : Window
             () => S.TabNotesEnabled, v => S.TabNotesEnabled = v);
         Tog("Tabs", "Modules", "Tasks Tab", "A Reminders-style to-do list: type a task and press Enter, tick the circle when it's done.",
             () => S.TabTasksEnabled, v => S.TabTasksEnabled = v);
+        Tog("Tabs", "Modules", "Scores Tab", "Live cricket, football, NBA, NFL, tennis and NHL scores. Click a match to pin it as a live activity.",
+            () => S.TabScoresEnabled, v => S.TabScoresEnabled = v);
         Seg("Tabs", "Modules", "Tab Navigation Style", "Choose between top header icon switcher, bottom indicator dots, or disable tab switchers.",
             new[] { "None", "Header", "Dots" }, new[] { "None", "Header", "Dots" }, () => S.TabNavigationStyle, v => S.TabNavigationStyle = v);
         Tog("Tabs", "Live Lyrics & Radar", "Show Lyrics in Compact Island", "Show active live lyric line in the compact idle capsule instead of track title.",
@@ -339,6 +341,12 @@ public sealed class SettingsWindow : Window
             () => S.EnableBatteryPopups, v => S.EnableBatteryPopups = v);
         Tog("Extras", "Live Activities", "Track & Play/Pause Popups", "Briefly expand the island when a new song starts, or when music pauses or resumes.",
             () => S.EnableTrackPopups, v => S.EnableTrackPopups = v);
+        Tog("Extras", "Live Activities", "Live Score Alerts", "For a pinned match: goals, wickets, kick-off and the final result.",
+            () => S.EnableScorePopups, v => S.EnableScorePopups = v);
+        Tog("Extras", "Live Activities", "Call Activity", "A green pill with the app and a call timer while Teams, Zoom, Discord, WhatsApp or any app uses your microphone.",
+            () => S.EnableCallActivity, v => S.EnableCallActivity = v);
+        Tog("Extras", "Live Activities", "Download Finished Popup", "A banner when a browser download in your Downloads folder completes. Click it to show the file.",
+            () => S.EnableDownloadPopups, v => S.EnableDownloadPopups = v);
         Tog("Extras", "Widgets", "Network Speed in System Stats", "Add live download and upload speed to the System Stats widget.",
             () => S.ShowNetworkSpeed, v => S.ShowNetworkSpeed = v);
         Add("Extras", "Widgets", "Weather City", "City for the Weather widget. Leave empty to detect your location automatically.",

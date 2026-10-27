@@ -12,6 +12,9 @@ static class Ui
     public static readonly FontFamily Font = new(FontBase, "SF Pro Text, ./Assets/Fonts/#Inter, Segoe UI");
     public static readonly FontFamily Display = new(FontBase, "SF Pro Display, ./Assets/Fonts/#Inter Display, ./Assets/Fonts/#Inter, Segoe UI");
     public static readonly FontFamily Icons = new("Segoe Fluent Icons, Segoe MDL2 Assets");
+    /// Sport glyphs (🏆 ⚽ 🏏 …) live outside the BMP, and WPF won't fall back to them from a font list: name the font.
+    public static readonly FontFamily Symbols = new("Segoe UI Symbol");
+    public static FontFamily GlyphFont(string glyph, FontFamily icons) => glyph.Length > 1 && char.IsSurrogate(glyph, 0) ? Symbols : icons;
     public static SolidColorBrush Brush(Color c, double alpha = 1)
     {
         var b = new SolidColorBrush(Color.FromArgb((byte)(c.A * alpha), c.R, c.G, c.B));

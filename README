@@ -35,6 +35,11 @@ Features (original)
 
 Extras (not in the original)
   Apple "minimal" bubble when two live activities run, album-colour tinted waveform, Focus/Pomodoro timer,
+  Scores tab: live cricket, football, NBA, NFL, tennis and NHL from ESPN's public scoreboard feed (the data behind Google's
+  score cards; Google has no API). Click a match to pin it: the capsule shows the live score, music/timer move to the bubble,
+  and banners announce kick-off, goals, wickets and the result. Polls only while pinned (30 s live) or while the tab is open.
+  Call activity: green pill with the app (Teams, Zoom, Discord, WhatsApp…) and call timer while an app holds the microphone.
+  Download Complete banner for browser downloads in the Downloads folder (click to show the file).
   Notes tab, Tasks tab (Reminders-style to-do list), Ctrl see-through (tap Ctrl over the island: it ghosts and clicks reach what's behind), volume HUD, Caps/Num Lock HUD, camera/mic privacy dot, weather widget, network speed,
   macOS Quick Look-style clip preview, password-manager-aware clipboard, custom hex colours.
 
@@ -43,7 +48,7 @@ Look & footprint
   Motion: staggered popup entrances, direction-aware tab slides with pill page dots, song-change and play/pause
   "pop" animations, springy button presses, a hover swell on the compact island, and an album glow that fills the
   whole silhouette (notch ears included) and fades with it. Popups announce song changes and play/pause.
-  Home start page: opens when nothing is playing (time, date, battery, weather, one-click resume); music opens the player.
+  Home start page: opens when nothing is playing (time, date, battery, connected Bluetooth device battery, weather, one-click resume); music opens the player.
   Game Mode: hides (window and all), holds popups and disables hover while a game Windows recognises (Game Bar's
   GameConfigStore list, so windowed/borderless too), exclusive-fullscreen D3D, presentation mode or a listed Focus App is in front.
   Settings window mimics macOS System Settings (traffic lights, toolbar history, pane cards, blue switches);

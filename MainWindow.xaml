@@ -166,6 +166,33 @@
             </Setter>
         </Style>
 
+        <!-- iOS segmented control segment: sits in a rounded track, the checked one is a raised grey tile -->
+        <Style x:Key="Segment" TargetType="RadioButton">
+            <Setter Property="Foreground" Value="#B3FFFFFF"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="FontWeight" Value="Medium"/>
+            <Setter Property="Height" Value="26"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Focusable" Value="False"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Border x:Name="b" CornerRadius="7" Background="Transparent">
+                            <ContentPresenter x:Name="cp" HorizontalAlignment="Center" VerticalAlignment="Center" TextElement.Foreground="{TemplateBinding Foreground}"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="cp" Property="TextElement.Foreground" Value="White"/></Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="b" Property="Background" Value="#636366"/>
+                                <Setter TargetName="cp" Property="TextElement.Foreground" Value="White"/>
+                                <Setter TargetName="cp" Property="TextElement.FontWeight" Value="SemiBold"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <Style x:Key="Field" TargetType="TextBox">
             <Setter Property="Foreground" Value="White"/>
             <Setter Property="CaretBrush" Value="White"/>
@@ -310,6 +337,8 @@
                             <TextBlock x:Name="CCalDay" FontSize="8.5" FontWeight="Bold" Foreground="{StaticResource Red}" HorizontalAlignment="Center" LineHeight="9" LineStackingStrategy="BlockLineHeight"/>
                             <TextBlock x:Name="CCalNum" FontSize="16" FontWeight="SemiBold" FontFamily="SF Pro Display, ./Assets/Fonts/#Inter Display, ./Assets/Fonts/#Inter" HorizontalAlignment="Center" LineHeight="17" LineStackingStrategy="BlockLineHeight"/>
                         </StackPanel>
+                        <!-- pinned match, Apple Sports Live Activity: each side of the island carries one team, mirrored -->
+                        <TextBlock x:Name="CScoreA" FontSize="12.5" FontWeight="SemiBold" VerticalAlignment="Center" Visibility="Collapsed"/>
                     </Grid>
 
                     <Grid x:Name="CCenter" Grid.Column="1" VerticalAlignment="Center" HorizontalAlignment="Center" Margin="8,0">
@@ -325,12 +354,14 @@
                         </Ellipse>
                         <c:Orb x:Name="COrb" Width="96" Height="22" Visibility="Collapsed"/>
                         <Border x:Name="CGap" Width="96" Height="1" Visibility="Collapsed"/>
+                        <TextBlock x:Name="CScoreStatus" FontSize="11.5" FontWeight="SemiBold" MinWidth="64" MaxWidth="130" Margin="6,0" TextAlignment="Center" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" Visibility="Collapsed"/>
                     </Grid>
 
                     <Grid x:Name="CTrail" Grid.Column="2" VerticalAlignment="Center" HorizontalAlignment="Center">
                         <c:Waveform x:Name="CWave" Width="26" Height="16" Visibility="Collapsed"/>
                         <TextBlock x:Name="CTrailText" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center" Visibility="Collapsed"/>
                         <c:Ring x:Name="CRing" Width="18" Height="18" Thickness="2.5" Visibility="Collapsed"/>
+                        <TextBlock x:Name="CScoreB" FontSize="12.5" FontWeight="SemiBold" VerticalAlignment="Center" Visibility="Collapsed"/>
                     </Grid>
 
                     <Ellipse x:Name="CPrivacy" Grid.Column="3" Width="6" Height="6" Margin="6,0,0,0" VerticalAlignment="Center" Visibility="Collapsed"/>
@@ -370,7 +401,8 @@
                                 <TextBlock x:Name="HomeTime" FontSize="46" FontWeight="Light" FontFamily="SF Pro Display, ./Assets/Fonts/#Inter Display, ./Assets/Fonts/#Inter" Margin="0,-8,0,-4"/>
                                 <TextBlock x:Name="HomeDate" Style="{StaticResource T2}" FontSize="13.5"/>
                             </StackPanel>
-                            <StackPanel x:Name="HomeChips" Grid.Column="1" VerticalAlignment="Center"/>
+                            <!-- two chips per column; a third starts a new one rather than growing the page -->
+                            <WrapPanel x:Name="HomeChips" Grid.Column="1" Orientation="Vertical" MaxHeight="70" VerticalAlignment="Center"/>
                         </Grid>
                         <!-- last session, one click from playing again -->
                         <Border x:Name="HomeResume" Grid.Row="1" Margin="0,12,0,0" CornerRadius="14" Background="#1C1C1E" Padding="8" Cursor="Hand" Visibility="Collapsed">
@@ -636,6 +668,21 @@
                             <StackPanel x:Name="TaskList"/>
                         </ScrollViewer>
                         <TextBlock x:Name="TaskEmpty" Grid.Row="1" Text="No tasks — you're all caught up" Style="{StaticResource T2}" HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False"/>
+                    </Grid>
+
+                    <!-- ===== SCORES (extra): click a match to pin it as a live activity ===== -->
+                    <Grid x:Name="PageScores" Visibility="Collapsed">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+                        <Border CornerRadius="9" Background="#1C1C1E" Padding="2">
+                            <UniformGrid x:Name="ScoreChips" Rows="1"/>
+                        </Border>
+                        <ScrollViewer x:Name="ScoreScroll" Grid.Row="1" Margin="0,8,0,0" VerticalScrollBarVisibility="Auto">
+                            <StackPanel x:Name="ScoreList"/>
+                        </ScrollViewer>
+                        <TextBlock x:Name="ScoreEmpty" Grid.Row="1" Style="{StaticResource T2}" HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False"/>
                     </Grid>
 
                     <!-- ===== OCR RESULT ===== -->

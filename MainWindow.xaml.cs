@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
@@ -12,6 +12,7 @@ using System.Windows.Threading;
 using Isle.Controls;
 using Isle.Services;
 using Path = System.Windows.Shapes.Path;
+using Run = System.Windows.Documents.Run;
 using IOPath = System.IO.Path;
 
 namespace Isle;
@@ -21,10 +22,10 @@ namespace Isle;
 public partial class MainWindow : Window
 {
     enum IslandState { Hidden, Compact, Expanded, Popup }
-    enum Page { Media, Timer, Clipboard, Apps, Notes, Ocr, Drop, Tour, Home, Tasks }
-    static readonly Page[] TabOrder = { Page.Media, Page.Timer, Page.Clipboard, Page.Apps, Page.Notes, Page.Home, Page.Tasks }; // new tabs go last: saved LastActiveTab indices keep their meaning
-    static readonly string[] TabGlyph = { "", "", "", "", "", "", "" };
-    static readonly string[] TabName = { "Media", "Timer", "Clipboard", "Apps", "Notes", "Home", "Tasks" };
+    enum Page { Media, Timer, Clipboard, Apps, Notes, Ocr, Drop, Tour, Home, Tasks, Scores }
+    static readonly Page[] TabOrder = { Page.Media, Page.Timer, Page.Clipboard, Page.Apps, Page.Notes, Page.Home, Page.Tasks, Page.Scores }; // new tabs go last: saved LastActiveTab indices keep their meaning
+    static readonly string[] TabGlyph = { "", "", "", "", "", "", "", "\U0001F3C6" };
+    static readonly string[] TabName = { "Media", "Timer", "Clipboard", "Apps", "Notes", "Home", "Tasks", "Scores" };
 
     static readonly Color Orange = Color.FromRgb(0xFF, 0x9F, 0x0A), Green = Color.FromRgb(0x30, 0xD1, 0x58),
         Red = Color.FromRgb(0xFF, 0x45, 0x3A), Blue = Color.FromRgb(0x0A, 0x84, 0xFF), Secondary = Color.FromArgb(0x99, 0xEB, 0xEB, 0xF5);
@@ -42,6 +43,7 @@ public partial class MainWindow : Window
     DateTime? _overSince, _outSince = DateTime.Now;
     Rect _islandRect, _bubbleRect;
     bool _bubbleOn;
+    Page _bubblePage = Page.Timer;
 
     // ---- animation ----
     sealed class Spring
@@ -108,12 +110,27 @@ public partial class MainWindow : Window
     DateTime _islandPlayClickAt, _prevClickAt;
     ImageSource _partFor, _martFor, _homeArtFor;
     string _homeChipsKey;
+    UIElement[] _compactParts;
+    readonly HashSet<UIElement> _compactOn = new();
+    List<(string Name, int Percent)> _btBatts = new();
+    DateTime _btAt;
     bool _mediaWasPlaying;
 
     // system watchers
     BatteryState _battery;
     bool _caps, _num;
-    (bool mic, bool cam) _privacy;
+    (bool mic, bool cam, string micApp, DateTime micSince) _privacy;
+    FileSystemWatcher _downloads;
+    string _downloadPath;
+
+    // live scores: the pinned match (its own league poll) and the Scores page list
+    Fixture _pinned;
+    DateTime _pinnedAt, _pinnedEndedAt;
+    bool _pinnedFetching;
+    List<Fixture> _scoreList;
+    string _scoreListFor;
+    DateTime _scoreListAt;
+    bool _scoreListFetching, _scoreListFailed;
     SystemInfo.Weather _weather;
     DateTime _weatherAt = DateTime.MinValue;
     string _weatherCity;
@@ -195,6 +212,9 @@ public partial class MainWindow : Window
         _tick.Tick += (_, _) => OnTick();
         _tick.Start();
         ApplySettings();
+#if DEBUG
+        Scores.SelfCheck();
+#endif
 
         if (!S.HasCompletedOnboarding)
             Dispatcher.BeginInvoke(async () => { await Task.Delay(1200); ReplayTour(); });
@@ -350,6 +370,8 @@ public partial class MainWindow : Window
         BuildIslandMenu();
         _ = EnsureLyrics();
         if (_weatherCity != S.WeatherCity) { _weatherCity = S.WeatherCity; _weatherAt = DateTime.MinValue; }
+        if (S.EnableDownloadPopups && _downloads == null) WatchDownloads();
+        if (_downloads != null) _downloads.EnableRaisingEvents = S.EnableDownloadPopups;
         BuildTimerPresets();
         if (!EnabledTabs.Contains(_page) && IsTab(_page)) _page = EnabledTabs.FirstOrDefault();
         if (_state == IslandState.Expanded) ShowPage(_page);
@@ -376,6 +398,7 @@ public partial class MainWindow : Window
             if (S.TabQuickLaunchEnabled) l.Add(Page.Apps);
             if (S.TabNotesEnabled) l.Add(Page.Notes);
             if (S.TabTasksEnabled) l.Add(Page.Tasks);
+            if (S.TabScoresEnabled) l.Add(Page.Scores);
             if (l.Count == 0) l.Add(Page.Media);
             return l;
         }
@@ -393,7 +416,11 @@ public partial class MainWindow : Window
     }
 
     bool TimerLive => _timerActive || _sw.IsRunning;
-    bool HasActivity => MediaLive || TimerLive || _radarCts != null;
+    bool ScorePinned => S.TabScoresEnabled && S.PinnedMatchId.Length > 0;
+    bool ScoreLive => ScorePinned && _pinned != null;
+    // a few seconds' grace: dictation and push-to-talk blips shouldn't flash a call pill
+    bool CallLive => S.EnableCallActivity && _privacy.mic && _privacy.micApp != null && DateTime.Now - _privacy.micSince > TimeSpan.FromSeconds(3);
+    bool HasActivity => MediaLive || TimerLive || _radarCts != null || ScoreLive || CallLive;
 
     void SetState(IslandState st)
     {
@@ -419,6 +446,7 @@ public partial class MainWindow : Window
     {
         // Apple: opening the island expands the live activity it is showing
         var tabs = EnabledTabs;
+        if (ScoreLive && !CallLive) return Page.Scores; // the pinned match holds the capsule (ScoreLive implies the tab is on)
         if (MediaLive && tabs.Contains(Page.Media)) return Page.Media;
         if (TimerLive && tabs.Contains(Page.Timer)) return Page.Timer;
         if (S.IdleWidgetMode == "NextTask" && tabs.Contains(Page.Tasks)) return Page.Tasks; // the capsule was showing a task
@@ -494,6 +522,7 @@ public partial class MainWindow : Window
             Page.Apps => (420, chrome + 8 + Math.Clamp((int)Math.Ceiling((S.QuickAppPaths.Count + 1) / 5.0), 1, 3) * 82),
             Page.Notes => (420, chrome + 170),
             Page.Tasks => (420, chrome + 196),
+            Page.Scores => (420, chrome + 270),
             Page.Ocr => (440, chrome + 200),
             Page.Drop => (420, chrome + 116),
             _ => (440, chrome + 160),
@@ -796,11 +825,19 @@ public partial class MainWindow : Window
         {
             // not while a menu is open: menus are topmost popups too, and re-asserting would bury them under the island
             if (!_fullscreen && !_menuOpen) Native.SetWindowPos(_hwnd, Native.HWND_TOPMOST, 0, 0, 0, 0, Native.SWP_NOMOVE | Native.SWP_NOSIZE | Native.SWP_NOACTIVATE);
-            if (S.EnablePrivacyIndicator) _privacy = SystemInfo.PrivacyInUse(); else _privacy = default;
+            if (S.EnablePrivacyIndicator || S.EnableCallActivity) _privacy = SystemInfo.PrivacyInUse(); else _privacy = default;
         }
         if (_ticks % 45 == 0 && S.IdleWidgetMode is "SystemStats" or "ActivityRings" or "Network")
             SystemInfo.SampleStats(net: S.IdleWidgetMode == "Network" || (S.IdleWidgetMode == "SystemStats" && S.ShowNetworkSpeed));
         if (_ticks % 90 == 0) CheckBattery();
+        // ponytail: the GC sizes its nursery at ~half the L3 cache (8 MB here) and that budget is only settable by
+        // environment variable, so the 30 fps loop would sweep 8+ MB of fresh pages between collections. A gen-0
+        // collection every 2 s (well under a millisecond on this heap) keeps the nursery to a few hundred KB.
+        if (_ticks % 60 == 0) GC.Collect(0, GCCollectionMode.Forced, blocking: true, compacting: false);
+        // pinned match: its own league every 30 s while live, every 2 min before the start; done once it's final
+        if (ScorePinned && !_pinnedFetching && now - _pinnedAt > TimeSpan.FromSeconds(_pinned == null || _pinned.Live ? 30 : _pinned.State == "pre" ? 120 : 600))
+            _ = RefreshPinned();
+        if (_pinned?.State == "post" && now - _pinnedEndedAt > TimeSpan.FromMinutes(20)) UnpinMatch(); // the result has had its moment
         if (S.IdleWidgetMode == "Weather" && now - _weatherAt > TimeSpan.FromMinutes(20))
         {
             _weatherAt = now;
@@ -849,7 +886,7 @@ public partial class MainWindow : Window
                 if ((over && !_suppressHover) || HasActivity || !S.AutoHideWhenIdle) { _stealthHidden = false; SetState(IslandState.Compact); }
                 break;
             case IslandState.Compact:
-                if (over && !_suppressHover && !S.ExpandOnClickOnly && overFor >= dwell) Expand(_bubbleRect.Contains(p) ? Page.Timer : null);
+                if (over && !_suppressHover && !S.ExpandOnClickOnly && overFor >= dwell) Expand(_bubbleRect.Contains(p) ? _bubblePage : null);
                 else if (!over && S.AutoHideWhenIdle && !HasActivity && outFor > idleDelay) { _stealthHidden = true; SetState(IslandState.Hidden); }
                 break;
             case IslandState.Expanded:
@@ -955,8 +992,10 @@ public partial class MainWindow : Window
 
     void UpdateCompact(DateTime now, double dt, Point cursor)
     {
-        UIElement[] all = { CArt, CLeadIcon, CBatt, CAnalog, CRings, CCal, CText, CDots, CBold, CEyes, CDot, COrb, CGap, CWave, CTrailText, CRing };
-        var on = new HashSet<UIElement>();
+        // runs 30 times a second: reuse the part list and the visible set instead of allocating them every tick
+        var all = _compactParts ??= new UIElement[] { CArt, CLeadIcon, CBatt, CAnalog, CRings, CCal, CText, CDots, CBold, CEyes, CDot, COrb, CGap, CWave, CTrailText, CRing, CScoreA, CScoreStatus, CScoreB };
+        var on = _compactOn;
+        on.Clear();
         double h = 34;
         bool side = IsSide;
         var m = _media.Current;
@@ -973,13 +1012,38 @@ public partial class MainWindow : Window
         void Lead(string glyph, Color c, string font = null)
         {
             CLeadIcon.Text = glyph;
-            CLeadIcon.FontFamily = font != null ? new FontFamily(font) : (FontFamily)FindResource("Icons");
-            CLeadIcon.Foreground = Ui.Brush(c);
-            on.Add(CLeadIcon);
+            if (CLeadIcon.FontFamily.Source != (font ?? Ui.Icons.Source)) CLeadIcon.FontFamily = font != null ? new FontFamily(font) : (FontFamily)FindResource("Icons");
+            SetFg(CLeadIcon, c);
+            _compactOn.Add(CLeadIcon); // the field, not `on`: capturing a local would allocate a closure every tick
         }
-        void Trail(string text, Color c) { CTrailText.Text = text; CTrailText.Foreground = Ui.Brush(c); on.Add(CTrailText); }
+        void Trail(string text, Color c) { CTrailText.Text = text; SetFg(CTrailText, c); _compactOn.Add(CTrailText); }
+        // a fresh brush every tick would re-render the text 30 times a second even when nothing changed
+        static void SetFg(TextBlock t, Color c) { if ((t.Foreground as SolidColorBrush)?.Color != c) t.Foreground = Ui.Brush(c); }
 
-        if (TimerLive && !MediaLive)
+        // a call, then a pinned match, take the capsule; music or the timer moves into the bubble beside it
+        if (CallLive)
+        {
+            Lead("", Green);
+            if (!side) Center(_privacy.micApp, 180);
+            Trail(Fmt(now - _privacy.micSince), Green);
+            SecondBubble();
+        }
+        else if (ScoreLive)
+        {
+            var sm = _pinned;
+            if (side)
+            {
+                Lead(Scores.GlyphFor(sm.Sport), Colors.White, Ui.Symbols.Source);
+                if (sm.Short.Length > 0) Trail(sm.Short, sm.Live ? Red : Secondary);
+            }
+            else
+            {
+                if (_scoreCapFor != sm) ScoreCapsule(sm); // each fetch is a new Fixture: rebuilt then, not every tick
+                on.Add(CScoreA); on.Add(CScoreStatus); on.Add(CScoreB);
+            }
+            SecondBubble();
+        }
+        else if (TimerLive && !MediaLive)
         {
             TimerCompact(Lead, Trail);
             if (!side) on.Add(CGap);
@@ -1003,9 +1067,27 @@ public partial class MainWindow : Window
             CWave.Push(_bands, m.IsPlaying, _spectrum.HasSignal, dt);
             on.Add(CWave);
             _bubbleOn = TimerLive;
+            _bubblePage = Page.Timer;
             if (_bubbleOn) UpdateBubble();
         }
         else IdleWidget(now, dt, cursor, on, Lead, Trail, ref h);
+
+        void Center(string text, double maxWidth)
+        {
+            CText.Text = text; CText.Foreground = Brushes.White; CText.FontWeight = FontWeights.SemiBold; CText.MaxWidth = maxWidth;
+            _compactOn.Add(CText);
+        }
+        void SecondBubble()
+        {
+            if (TimerLive) { _bubbleOn = true; _bubblePage = Page.Timer; UpdateBubble(); }
+            else if (MediaLive)
+            {
+                _bubbleOn = true; _bubblePage = Page.Media;
+                BubbleRing.Visibility = Visibility.Collapsed;
+                BubbleIcon.Text = ""; // music note, in the album colour
+                SetFg(BubbleIcon, Tint);
+            }
+        }
 
         foreach (var e in all)
         {
@@ -1013,9 +1095,9 @@ public partial class MainWindow : Window
             if (e.Visibility != v) e.Visibility = v;
         }
 
-        bool priv = _privacy.mic || _privacy.cam;
+        bool priv = S.EnablePrivacyIndicator && (_privacy.mic || _privacy.cam);
         CPrivacy.Visibility = priv ? Visibility.Visible : Visibility.Collapsed;
-        if (priv) CPrivacy.Fill = Ui.Brush(_privacy.cam ? Green : Orange);
+        if (priv && (CPrivacy.Fill as SolidColorBrush)?.Color != (_privacy.cam ? Green : Orange)) CPrivacy.Fill = Ui.Brush(_privacy.cam ? Green : Orange);
 
         CompactGrid.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
         double w, hh;
@@ -1239,7 +1321,7 @@ public partial class MainWindow : Window
         }
         _page = p;
         if (IsTab(p)) { int idx = Array.IndexOf(TabOrder, p); if (S.LastActiveTab != idx) { S.LastActiveTab = idx; } }
-        foreach (var (g, pg) in new (Grid, Page)[] { (PageHome, Page.Home), (PageMedia, Page.Media), (PageTimer, Page.Timer), (PageClipboard, Page.Clipboard), (PageApps, Page.Apps), (PageNotes, Page.Notes), (PageTasks, Page.Tasks), (PageOcr, Page.Ocr), (PageDrop, Page.Drop), (PageTour, Page.Tour) })
+        foreach (var (g, pg) in new (Grid, Page)[] { (PageHome, Page.Home), (PageMedia, Page.Media), (PageTimer, Page.Timer), (PageClipboard, Page.Clipboard), (PageApps, Page.Apps), (PageNotes, Page.Notes), (PageTasks, Page.Tasks), (PageScores, Page.Scores), (PageOcr, Page.Ocr), (PageDrop, Page.Drop), (PageTour, Page.Tour) })
             g.Visibility = pg == p ? Visibility.Visible : Visibility.Collapsed;
         Header.Visibility = IsTab(p) && S.TabNavigationStyle == "Header" ? Visibility.Visible : Visibility.Collapsed;
         Pages.Margin = new Thickness(18, Header.Visibility == Visibility.Visible ? 2 : 16, 18, 6);
@@ -1256,6 +1338,7 @@ public partial class MainWindow : Window
             case Page.Apps: BuildApps(); break;
             case Page.Notes: NotesBox.Text = S.Notes; NotesHint.Visibility = string.IsNullOrEmpty(S.Notes) ? Visibility.Visible : Visibility.Collapsed; break;
             case Page.Tasks: BuildTasks(); break;
+            case Page.Scores: OpenScores(); break;
             case Page.Tour: RefreshTour(); break;
             case Page.Drop: DropFolderName.Text = IOPath.GetFileName(DropFolderPath()); break;
         }
@@ -1271,6 +1354,7 @@ public partial class MainWindow : Window
         {
             int i = Array.IndexOf(TabOrder, tab);
             var btn = new Button { Style = (Style)FindResource("Glyph"), Content = TabGlyph[i], Width = 26, Height = 26, FontSize = 12, ToolTip = TabName[i], Tag = tab, Margin = new Thickness(0, 0, 2, 0) };
+            if (Ui.GlyphFont(TabGlyph[i], null) == Ui.Symbols) btn.FontFamily = Ui.Symbols;
             btn.Click += (_, _) => ShowPage(tab);
             TabIcons.Children.Add(btn);
             var dot = new Border { Width = 6, Height = 6, CornerRadius = new CornerRadius(3), Background = Brushes.White, Margin = new Thickness(3, 0, 3, 0), Tag = tab, Cursor = Cursors.Hand };
@@ -1331,6 +1415,7 @@ public partial class MainWindow : Window
             case Page.Home: if (_ticks % 15 == 0) RefreshHome(); break; // clock and chips; twice a second is plenty
             case Page.Media: UpdateMediaLive(dt); break;
             case Page.Timer: UpdateTimerLive(); break;
+            case Page.Scores: if (DateTime.Now - _scoreListAt > TimeSpan.FromSeconds(60)) _ = LoadScores(); break;
         }
     }
 
@@ -1342,9 +1427,20 @@ public partial class MainWindow : Window
         HomeTime.Text = S.Use12HourClock ? now.ToString("h:mm") : now.ToString("HH:mm");
         HomeDate.Text = now.ToString("dddd, d MMMM");
 
+        // connected Bluetooth batteries: sampled only while Home is on screen, every 30 s (sooner after an audio device change)
+        if (now - _btAt > TimeSpan.FromSeconds(30)) { _btAt = now; _ = RefreshBtBatteries(); }
+
         string chipsKey = $"{_battery}|{_weather}|{S.WeatherFahrenheit}";
         if (chipsKey != _homeChipsKey) { _homeChipsKey = chipsKey; BuildHomeChips(); }
         RefreshHomeMedia();
+    }
+
+    async Task RefreshBtBatteries()
+    {
+        var list = await SystemInfo.BluetoothBatteriesAsync();
+        if (list.SequenceEqual(_btBatts)) return;
+        _btBatts = list;
+        _homeChipsKey = null; // rebuilt on the next refresh
     }
 
     void BuildHomeChips()
@@ -1361,6 +1457,13 @@ public partial class MainWindow : Window
             double temp = S.WeatherFahrenheit ? _weather.TempC * 9 / 5 + 32 : _weather.TempC;
             var icon = new TextBlock { Text = SystemInfo.WeatherGlyph(_weather.Code), FontFamily = new FontFamily("Segoe UI Symbol"), FontSize = 14, VerticalAlignment = VerticalAlignment.Center };
             HomeChips.Children.Add(Chip(icon, $"{temp:0}°", Colors.White));
+        }
+        foreach (var (name, pct) in _btBatts.Take(2))
+        {
+            var icon = new TextBlock { Text = SystemInfo.LooksLikeHeadphones(name) ? "" : "", FontFamily = (FontFamily)FindResource("Icons"), FontSize = 14, VerticalAlignment = VerticalAlignment.Center };
+            var chip = Chip(icon, $"{pct}%", pct <= 20 ? Red : Colors.White);
+            chip.ToolTip = name;
+            HomeChips.Children.Add(chip);
         }
     }
 
@@ -1394,7 +1497,7 @@ public partial class MainWindow : Window
         var sp = new StackPanel { Orientation = Orientation.Horizontal };
         sp.Children.Add(icon);
         sp.Children.Add(new TextBlock { Text = text, FontSize = 13, FontWeight = FontWeights.SemiBold, Foreground = Ui.Brush(color), Margin = new Thickness(7, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center });
-        return new Border { Child = sp, CornerRadius = new CornerRadius(11), Background = Ui.Brush(Color.FromRgb(0x1C, 0x1C, 0x1E)), Padding = new Thickness(10, 5, 11, 5), Margin = new Thickness(0, 3, 0, 3), HorizontalAlignment = HorizontalAlignment.Right };
+        return new Border { Child = sp, CornerRadius = new CornerRadius(11), Background = Ui.Brush(Color.FromRgb(0x1C, 0x1C, 0x1E)), Padding = new Thickness(10, 5, 11, 5), Margin = new Thickness(6, 3, 0, 3), HorizontalAlignment = HorizontalAlignment.Right };
     }
 
     // ----- media -----
@@ -2112,6 +2215,7 @@ public partial class MainWindow : Window
         PTrailText.FontSize = 13;
         PLeadText.FontFamily = FontFamily;
         PLeadText.Foreground = Brushes.White;
+        PIcon.FontFamily = (FontFamily)FindResource("Icons"); // a score banner may have switched it to the sport glyph font
         PopupView.Margin = new Thickness(14, 0, 14, 0);
     }
 
@@ -2155,6 +2259,7 @@ public partial class MainWindow : Window
     {
         ResetPopup();
         PIcon.Text = glyph; PIcon.Foreground = Ui.Brush(color); PIconBg.Fill = Ui.Brush(color, 0.22);
+        PIcon.FontFamily = Ui.GlyphFont(glyph, (FontFamily)FindResource("Icons"));
         PIconWrap.Visibility = Visibility.Visible;
         PTitle.Text = title; PTitle.Foreground = Ui.Brush(color);
         PSub.Text = sub;
@@ -2258,6 +2363,7 @@ public partial class MainWindow : Window
     async void OnAudioDeviceChanged(string name)
     {
         _spectrum.Restart();
+        _btAt = default; // Home re-reads Bluetooth batteries next time it refreshes
         if (!S.EnableHeadsetPopup || string.IsNullOrWhiteSpace(name) || S.SilentDormantMode) return;
         bool phones = SystemInfo.LooksLikeHeadphones(name);
         string shortName = name;
@@ -2301,12 +2407,17 @@ public partial class MainWindow : Window
                 // delay the click that was meant to open the capsule landed on the already-open island and pinned it.
                 case IslandState.Popup:
                     if (_popupKind == "banner" && _popupPage == Page.Timer && !_timerActive) { EndPopup(); e.Handled = true; break; }
+                    if (_popupKind == "download") // show the file, not a page
+                    {
+                        try { Process.Start("explorer.exe", $"/select,\"{_downloadPath}\""); } catch { }
+                        EndPopup(); e.Handled = true; break;
+                    }
                     Expand(_popupPage);
                     e.Handled = true;
                     break;
             }
         };
-        Bubble.MouseLeftButtonUp += (_, e) => { Expand(Page.Timer); e.Handled = true; };
+        Bubble.MouseLeftButtonUp += (_, e) => { Expand(_bubblePage); e.Handled = true; };
         PinBtn.Click += (_, _) => TogglePin();
 
         Island.PreviewMouseWheel += (_, e) =>
@@ -2318,6 +2429,7 @@ public partial class MainWindow : Window
                  (IsDescendant(AppsScroll, src) && AppsScroll.ScrollableHeight > 0) ||
                  (IsDescendant(LapsScroll, src) && LapsScroll.ScrollableHeight > 0) ||
                  (IsDescendant(TaskScroll, src) && TaskScroll.ScrollableHeight > 0) ||
+                 (IsDescendant(ScoreScroll, src) && ScoreScroll.ScrollableHeight > 0) ||
                  (IsDescendant(NotesBox, src) && NotesBox.ExtentHeight > NotesBox.ViewportHeight) ||
                  IsDescendant(OcrText, src) || IsDescendant(VolumeBtn, src) || IsDescendant(MVolumeRow, src)))
                 return;
@@ -2404,6 +2516,11 @@ public partial class MainWindow : Window
             S.Save();
             BuildTasks();
         };
+
+        ScoreScroll.ScrollChanged += (_, e) =>
+        {
+            if (_scoreOrder != null && _scoreShown < _scoreOrder.Count && e.VerticalOffset > ScoreScroll.ScrollableHeight - 80) MoreScores(8);
+        };
     }
 
     void BuildTasks()
@@ -2455,6 +2572,267 @@ public partial class MainWindow : Window
             ("Delete", () => { S.Tasks.Remove(t); S.Save(); BuildTasks(); }),
             (S.Tasks.Any(x => x.Done) ? "Clear Completed" : null, () => { S.Tasks.RemoveAll(x => x.Done); S.Save(); BuildTasks(); }));
         return row;
+    }
+
+    // ----- live scores -----
+
+    void OpenScores()
+    {
+        _scoreShown = 0;
+        BuildScoreChips();
+        BuildScores();
+        if (_scoreListFor != S.ScoresSport || DateTime.Now - _scoreListAt > TimeSpan.FromSeconds(30)) _ = LoadScores();
+    }
+
+    async Task LoadScores()
+    {
+        if (_scoreListFetching) return;
+        _scoreListFetching = true;
+        string sport = S.ScoresSport;
+        _scoreListAt = DateTime.Now;
+        if (_scoreListFor != sport) { _scoreList = null; _scoreListFailed = false; _scoreListFor = sport; _scoreShown = 0; BuildScores(); } // "Loading…"
+        var q = Array.Find(Scores.Sports, x => x.Label == sport).Query ?? Scores.Sports[0].Query;
+        var list = await Scores.GetAsync(q);
+        _scoreListFetching = false;
+        if (sport != S.ScoresSport) { _ = LoadScores(); return; } // another chip was picked meanwhile
+        _scoreListFailed = list == null;
+        if (list != null) _scoreList = list;
+        if (_page == Page.Scores) BuildScores();
+    }
+
+    void BuildScoreChips()
+    {
+        if (ScoreChips.Children.Count > 0) return; // radio chips keep their own checked state
+        foreach (var (label, _, _) in Scores.Sports)
+        {
+            var b = new RadioButton { Style = (Style)FindResource("Segment"), GroupName = "sport", Content = label, IsChecked = label == S.ScoresSport };
+            b.Checked += (_, _) => { S.ScoresSport = label; S.Save(); _ = LoadScores(); };
+            ScoreChips.Children.Add(b);
+        }
+    }
+
+    List<Fixture> _scoreOrder;
+    int _scoreShown;
+
+    void BuildScores()
+    {
+        ScoreList.Children.Clear();
+        var list = _scoreList;
+        ScoreEmpty.Text = list == null ? (_scoreListFailed ? "Couldn't reach the scores feed" : "Loading…") : "No matches right now";
+        int Rank(Fixture m) => m.Id == S.PinnedMatchId ? 0 : m.Live ? 1 : m.State == "pre" ? 2 : 3;
+        // Apple Sports: grouped under the league, pinned then live, upcoming, finished (GroupBy keeps first-seen order)
+        // ponytail: 40 cards at most; a busy football day lists 75
+        _scoreOrder = list?.OrderBy(Rank).Take(40).GroupBy(m => m.League).SelectMany(g => g).ToList();
+        int keep = Math.Max(12, _scoreShown); // a refresh keeps what was scrolled into view
+        _scoreShown = 0;
+        if (_scoreOrder != null) MoreScores(keep);
+        ScoreEmpty.Visibility = ScoreList.Children.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    /// Cards are built as they scroll into view: a whole day's 36 cards up front cost ~5 MB while the page is open.
+    void MoreScores(int n)
+    {
+        var order = _scoreOrder;
+        for (int end = Math.Min(order.Count, _scoreShown + n); _scoreShown < end; _scoreShown++)
+        {
+            var m = order[_scoreShown];
+            if (_scoreShown == 0 || order[_scoreShown - 1].League != m.League)
+                ScoreList.Children.Add(new TextBlock
+                {
+                    Text = m.League, FontSize = 12, FontWeight = FontWeights.SemiBold, Foreground = (Brush)FindResource("Secondary"),
+                    TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(4, _scoreShown == 0 ? 0 : 8, 0, 5),
+                });
+            ScoreList.Children.Add(ScoreRow(m));
+        }
+    }
+
+    static readonly Brush CardBg = Ui.Brush(Color.FromRgb(0x1C, 0x1C, 0x1E)), CardHover = Ui.Brush(Color.FromRgb(0x2C, 0x2C, 0x2E)), Hairline = Ui.Brush(Colors.White, 0.14);
+
+    /// The status column: kick-off time before the start, "Final" after, the feed's own word while on ("67'", "Lunch", "Q3 5:42").
+    string ScoreStatus(Fixture m) => m.State switch
+    {
+        "pre" => m.Start == default ? m.Summary : m.Start.ToString(S.Use12HourClock ? "h:mm tt" : "HH:mm"),
+        "post" => m.Summary is "" or "Result" ? "Final" : m.Summary,
+        _ => m.Summary,
+    };
+
+    static string Day(DateTime t) => t.Date == DateTime.Today ? "Today" : t.Date == DateTime.Today.AddDays(1) ? "Tomorrow" : t.ToString("ddd d MMM");
+
+    /// Apple Sports card: a row per team (name, then score with cricket's overs beside it), a hairline, the status column.
+    Border ScoreRow(Fixture m)
+    {
+        bool pinned = m.Id == S.PinnedMatchId;
+        var dim = (Brush)FindResource("Secondary");
+        var g = new Grid();
+        g.ColumnDefinitions.Add(new ColumnDefinition());                              // team
+        g.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });    // score
+        g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(86) }); // status
+        g.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(16) }); // pin
+        for (int i = 0; i < 3; i++) g.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+        void Add(UIElement e, int row, int col, int span = 1)
+        {
+            Grid.SetRow(e, row); Grid.SetColumn(e, col);
+            if (span > 1) { if (col >= 2) Grid.SetRowSpan(e, span); else Grid.SetColumnSpan(e, span); }
+            g.Children.Add(e);
+        }
+        void Team(Side s, Side other, int row)
+        {
+            var fg = other.Winner ? dim : Brushes.White; // a decided result greys the loser out
+            // runs inside one TextBlock, not nested panels: 40 cards' element count is most of this page's memory
+            var name = new TextBlock { Text = s.Name.Length > 0 ? s.Name : s.Abbr, FontSize = 13.5, FontWeight = FontWeights.SemiBold, Foreground = fg, TextTrimming = TextTrimming.CharacterEllipsis, VerticalAlignment = VerticalAlignment.Center };
+            if (s.Batting && m.Live) name.Inlines.Add(new Run(" •") { Foreground = dim }); // at the crease
+            Add(name, row, 0);
+
+            var score = new TextBlock { HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(10, 1, 0, 1) };
+            if (s.Note.Length > 0) score.Inlines.Add(new Run(s.Note + "  ") { FontSize = 11, Foreground = dim });
+            score.Inlines.Add(new Run(s.Main) { FontFamily = Ui.Display, FontSize = 15, FontWeight = FontWeights.Bold, Foreground = fg });
+            Add(score, row, 1);
+        }
+        Team(m.A, m.B, 0);
+        Team(m.B, m.A, 1);
+        if (m.Detail.Length > 0 && m.State != "pre") // "Nagaland lead by 12 runs"; before the start it only repeats the time
+            Add(new TextBlock { Text = m.Detail, FontSize = 11.5, Foreground = dim, TextTrimming = TextTrimming.CharacterEllipsis, Margin = new Thickness(0, 3, 0, 0) }, 2, 0, 2);
+
+        var st = new TextBlock
+        {
+            Text = ScoreStatus(m), FontSize = 12, FontWeight = FontWeights.SemiBold, TextAlignment = TextAlignment.Center, TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Center,
+            MaxHeight = 34, TextTrimming = TextTrimming.CharacterEllipsis, Foreground = m.Live ? Ui.Brush(Red) : m.State == "pre" ? Brushes.White : dim,
+        };
+        if (m.State == "pre" && m.Start != default)
+        {
+            st.Inlines.Add(new System.Windows.Documents.LineBreak());
+            st.Inlines.Add(new Run(Day(m.Start)) { FontSize = 11, FontWeight = FontWeights.Normal, Foreground = dim });
+        }
+        Add(new Border { BorderBrush = Hairline, BorderThickness = new Thickness(1, 0, 0, 0), Margin = new Thickness(12, 2, 0, 2), Padding = new Thickness(6, 0, 0, 0), Child = st }, 0, 2, 3);
+
+        var pin = new TextBlock
+        {
+            Text = pinned ? "" : "", FontFamily = Ui.Icons, FontSize = 11, HorizontalAlignment = HorizontalAlignment.Right, VerticalAlignment = VerticalAlignment.Center,
+            Foreground = pinned ? Ui.Brush(Orange) : (Brush)FindResource("Tertiary"), Opacity = pinned ? 1 : 0,
+        };
+        Add(pin, 0, 3, 3);
+
+        var card = new Border
+        {
+            CornerRadius = new CornerRadius(14), Padding = new Thickness(12, 9, 10, 9), Margin = new Thickness(0, 0, 0, 6), Cursor = Cursors.Hand, Child = g, Background = CardBg,
+            ToolTip = pinned ? "Pinned to the island — click to unpin" : "Pin to the island as a live activity",
+        };
+        card.MouseEnter += (_, _) => { card.Background = CardHover; pin.Opacity = 1; };
+        card.MouseLeave += (_, _) => { card.Background = CardBg; pin.Opacity = pinned ? 1 : 0; };
+        card.MouseLeftButtonUp += (_, e) => { if (pinned) UnpinMatch(); else PinMatch(m); e.Handled = true; };
+        return card;
+    }
+
+    Fixture _scoreCapFor;
+
+    /// Apple Sports Live Activity in the capsule, one team either side: "NZ 101/2   10.2/20 ov   IND".
+    /// Names quiet, scores bold, the state red while it's on.
+    void ScoreCapsule(Fixture m)
+    {
+        _scoreCapFor = m;
+        var dim = (Brush)FindResource("Secondary");
+        Run Score(Side s, Side other) => new(s.Main) { FontFamily = Ui.Display, FontSize = 14.5, FontWeight = FontWeights.Bold, Foreground = other.Winner ? dim : Brushes.White };
+        CScoreA.Inlines.Clear();
+        CScoreA.Inlines.Add(new Run(m.A.Abbr + (m.A.Main.Length > 0 ? " " : "")) { Foreground = dim });
+        CScoreA.Inlines.Add(Score(m.A, m.B));
+        CScoreB.Inlines.Clear();
+        CScoreB.Inlines.Add(Score(m.B, m.A));
+        CScoreB.Inlines.Add(new Run((m.B.Main.Length > 0 ? " " : "") + m.B.Abbr) { Foreground = dim });
+        // live cricket only says "Live": the batting side's overs say more
+        var bat = m.A.Batting ? m.A : m.B.Batting ? m.B : null;
+        CScoreStatus.Text = m.Live && m.Summary == "Live" && bat?.Note.Length > 0 ? bat.Note
+            : m.State == "pre" && m.Start != default && m.Start.Date != DateTime.Today ? m.Start.ToString("ddd ") + ScoreStatus(m) : ScoreStatus(m);
+        CScoreStatus.Foreground = m.Live ? Ui.Brush(Red) : dim;
+    }
+
+    void PinMatch(Fixture m)
+    {
+        S.PinnedMatchId = m.Id;
+        S.PinnedMatchQuery = m.Refresh;
+        S.Save();
+        _pinned = m;
+        _pinnedAt = DateTime.Now;
+        _pinnedEndedAt = m.State == "post" ? DateTime.Now : default;
+        BuildScores();
+    }
+
+    void UnpinMatch()
+    {
+        S.PinnedMatchId = S.PinnedMatchQuery = "";
+        S.Save();
+        _pinned = null;
+        if (_page == Page.Scores) BuildScores();
+    }
+
+    async Task RefreshPinned()
+    {
+        _pinnedFetching = true;
+        _pinnedAt = DateTime.Now;
+        string id = S.PinnedMatchId;
+        var list = await Scores.GetAsync(S.PinnedMatchQuery);
+        _pinnedFetching = false;
+        if (list == null || id != S.PinnedMatchId) return; // offline (keep the last score) or re-pinned meanwhile
+        var m = list.Find(x => x.Id == id);
+        if (m == null) { UnpinMatch(); return; } // the feed has dropped it: long finished
+        var old = _pinned;
+        _pinned = m;
+        if (m.State == "post" && old?.State != "post") _pinnedEndedAt = DateTime.Now;
+        if (old != null) ScoreAlert(old, m);
+        if (_state == IslandState.Expanded && _page == Page.Scores && _scoreList != null)
+        {
+            int i = _scoreList.FindIndex(x => x.Id == id);
+            if (i >= 0) { _scoreList[i] = m; BuildScores(); }
+        }
+    }
+
+    /// Banner for the moments that matter: kick-off, the result, and goals / wickets (runs and baskets change too often).
+    void ScoreAlert(Fixture old, Fixture m)
+    {
+        if (!S.EnableScorePopups || S.SilentDormantMode) return;
+        string title = null;
+        if (old.State == "pre" && m.Live) title = "Live Now";
+        else if (old.Live && m.State == "post") title = m.Sport == "soccer" ? "Full Time" : "Final";
+        else if (m.Live && (old.A.Score != m.A.Score || old.B.Score != m.B.Score))
+            title = m.Sport switch
+            {
+                "cricket" => Scores.Wickets(m.A.Score) > Scores.Wickets(old.A.Score) || Scores.Wickets(m.B.Score) > Scores.Wickets(old.B.Score) ? "Wicket!" : null,
+                "soccer" or "hockey" => "Goal!",
+                "football" => "Score!",
+                _ => null,
+            };
+        if (title == null) return;
+        Banner(Scores.GlyphFor(m.Sport), title == "Wicket!" ? Red : Green, title, m.Line + (m.Summary.Length > 0 ? " · " + m.Summary : ""), 6, Page.Scores);
+    }
+
+    // ----- downloads -----
+
+    void WatchDownloads()
+    {
+        // the Downloads folder can be moved: Explorer records where (FOLDERID_Downloads)
+        string dir = Microsoft.Win32.Registry.GetValue(@"HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Explorer\Shell Folders",
+            "{374DE290-123F-4565-9164-39C4925E467B}", null) as string ?? IOPath.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads");
+        if (!Directory.Exists(dir)) return;
+        try
+        {
+            _downloads = new FileSystemWatcher(dir) { NotifyFilter = NotifyFilters.FileName };
+            // browsers write "name.crdownload" (Chrome, Edge) or "name.part" (Firefox) and rename it when the download completes
+            _downloads.Renamed += (_, e) => { if (Partial(e.OldName) && !Partial(e.Name)) Dispatcher.BeginInvoke(() => DownloadPopup(e.FullPath)); };
+        }
+        catch (Exception ex) { AppHost.Log("Downloads watcher: " + ex.Message); _downloads = null; }
+
+        static bool Partial(string n) => n != null && (n.EndsWith(".crdownload", StringComparison.OrdinalIgnoreCase) || n.EndsWith(".part", StringComparison.OrdinalIgnoreCase));
+    }
+
+    void DownloadPopup(string path)
+    {
+        if (!S.EnableDownloadPopups || S.SilentDormantMode) return;
+        long size = 0;
+        try { size = new FileInfo(path).Length; } catch { }
+        string sz = size >= 1 << 30 ? $" · {size / (double)(1 << 30):0.0} GB" : size >= 1 << 20 ? $" · {size / (double)(1 << 20):0.0} MB" : size > 0 ? $" · {Math.Max(1, size >> 10)} KB" : "";
+        Banner("", Blue, "Download Complete", IOPath.GetFileName(path) + sz, 5, null);
+        _downloadPath = path;
+        if (_state == IslandState.Popup && _popupKind == "banner") _popupKind = "download"; // a click shows the file in Explorer
     }
 
     string DropFolderPath()

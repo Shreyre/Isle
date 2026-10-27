@@ -57,8 +57,10 @@ public static class AppHost
             var trim = new DispatcherTimer(DispatcherPriority.ApplicationIdle) { Interval = TimeSpan.FromSeconds(12) };
             trim.Tick += (_, _) =>
             {
+                // busy (open or animating): try again shortly — waiting the full 3 minutes left start-up's ~150 MB resident
+                if (Island.IsBusy) { trim.Interval = TimeSpan.FromSeconds(5); return; }
                 trim.Interval = TimeSpan.FromMinutes(3);
-                if (!Island.IsBusy) TrimMemory();
+                TrimMemory();
             };
             trim.Start();
         };
