@@ -525,10 +525,10 @@ public partial class MainWindow : Window
         return p switch
         {
             // the fixed sizes here were tuned against a 17 px bottom row, but with the 18 px pin button it's really 25:
-            // Home is measured, so it needs the true row
-            Page.Home => (420, chrome + (row ? 8 : 0) + HomeHeight()),
-            Page.Media => (420, chrome + 136 + (LyricsShownInPage ? 62 : 0)),
-            Page.Timer => (440, chrome + 118),
+            // measured pages need the true row
+            Page.Home => (420, chrome + (row ? 8 : 0) + Measured(PageHome)),
+            Page.Media => (420, chrome + (row ? 8 : 0) + Measured(PageMedia)), // lyrics, radar and the play button all fit
+            Page.Timer => (440, chrome + 8 + 119), // true 25 px row (see Home); segments 30 + 12 + presets 30 + 10 + custom row 37
             Page.Clipboard => (440, chrome + 290),
             Page.Apps => (420, chrome + 8 + Math.Clamp((int)Math.Ceiling((S.QuickAppPaths.Count + 1) / 5.0), 1, 3) * 82),
             Page.Notes => (420, chrome + 170),
@@ -1549,11 +1549,12 @@ public partial class MainWindow : Window
         }
     }
 
-    // measured, not summed: stacked chips (68 px) outgrew the old fixed 64 px top row and pushed the resume card into the dots
-    double HomeHeight()
+    // measured, not summed: fixed sums drifted from the content (stacked Home chips, the 48 px play button) and the
+    // dots row cut it off. Width = the 420 px page less the Pages side margins.
+    static double Measured(FrameworkElement page)
     {
-        PageHome.Measure(new Size(420 - 36, double.PositiveInfinity));
-        return Math.Ceiling(PageHome.DesiredSize.Height);
+        page.Measure(new Size(420 - 36, double.PositiveInfinity));
+        return Math.Ceiling(page.DesiredSize.Height);
     }
 
     Border Chip(UIElement icon, string text, Color color)
@@ -1933,7 +1934,7 @@ public partial class MainWindow : Window
         TimerPresets.Children.Clear();
         foreach (var (label, mins) in new[] { ("1 min", 1), ("5 min", 5), ("10 min", 10), ("15 min", 15), ("30 min", 30), ("1 hr", 60) })
         {
-            var b = new Button { Style = (Style)FindResource("Pill"), Content = label, Margin = new Thickness(0, 0, 6, 0), Padding = new Thickness(10, 6, 10, 6) };
+            var b = new Button { Style = (Style)FindResource("SegAction"), Content = label, Padding = new Thickness(4, 0, 4, 0) };
             b.Click += (_, _) => StartTimer(TimeSpan.FromMinutes(mins));
             TimerPresets.Children.Add(b);
         }

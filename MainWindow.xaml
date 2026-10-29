@@ -106,13 +106,20 @@
             </Setter>
         </Style>
 
-        <!-- Capsule text button -->
-        <Style x:Key="Pill" TargetType="Button">
-            <Setter Property="Foreground" Value="White"/>
-            <Setter Property="Background" Value="#2C2C2E"/>
+        <!-- Text buttons wear the segmented-control look (see Segment): a row of them sits in a SegTrack inside a
+             UniformGrid, the primary action is the raised grey tile (SegPrimary), no brand-coloured capsules -->
+        <Style x:Key="SegTrack" TargetType="Border">
+            <Setter Property="CornerRadius" Value="9"/>
+            <Setter Property="Background" Value="#1C1C1E"/>
+            <Setter Property="Padding" Value="2"/>
+        </Style>
+        <Style x:Key="SegAction" TargetType="Button">
+            <Setter Property="Foreground" Value="#B3FFFFFF"/>
+            <Setter Property="Background" Value="Transparent"/>
             <Setter Property="FontSize" Value="12"/>
-            <Setter Property="FontWeight" Value="SemiBold"/>
-            <Setter Property="Padding" Value="12,6"/>
+            <Setter Property="FontWeight" Value="Medium"/>
+            <Setter Property="Height" Value="26"/>
+            <Setter Property="Padding" Value="12,0"/>
             <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="Focusable" Value="False"/>
             <Setter Property="Template">
@@ -120,11 +127,12 @@
                     <ControlTemplate TargetType="Button">
                         <Grid x:Name="g" RenderTransformOrigin="0.5,0.5">
                             <Grid.RenderTransform><ScaleTransform/></Grid.RenderTransform>
-                            <Border CornerRadius="999" Background="{TemplateBinding Background}"/>
-                            <Border x:Name="hl" CornerRadius="999" Background="White" Opacity="0"/>
-                            <ContentPresenter Margin="{TemplateBinding Padding}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            <Border CornerRadius="7" Background="{TemplateBinding Background}"/>
+                            <Border x:Name="hl" CornerRadius="7" Background="White" Opacity="0"/>
+                            <ContentPresenter x:Name="cp" Margin="{TemplateBinding Padding}" HorizontalAlignment="Center" VerticalAlignment="Center" TextElement.Foreground="{TemplateBinding Foreground}"/>
                         </Grid>
                         <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="cp" Property="TextElement.Foreground" Value="White"/></Trigger>
                             <Trigger Property="IsMouseOver" Value="True">
                                 <Trigger.EnterActions><BeginStoryboard Storyboard="{StaticResource HoverIn}"/></Trigger.EnterActions>
                                 <Trigger.ExitActions><BeginStoryboard Storyboard="{StaticResource HoverOut}"/></Trigger.ExitActions>
@@ -137,6 +145,11 @@
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
+        </Style>
+        <Style x:Key="SegPrimary" TargetType="Button" BasedOn="{StaticResource SegAction}">
+            <Setter Property="Background" Value="#636366"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
         </Style>
 
         <!-- iOS segmented control segment: sits in a rounded track, the checked one is a raised grey tile -->
@@ -457,7 +470,7 @@
                                 <TextBlock x:Name="MRemain" Grid.Column="2" Style="{StaticResource Tiny}" Text="-0:00" HorizontalAlignment="Right" VerticalAlignment="Center"/>
                             </Grid>
 
-                            <Grid Grid.Row="3" Margin="0,4,0,0" Height="44">
+                            <Grid Grid.Row="3" Margin="0,4,0,0" Height="48"> <!-- PlayBtn's height: at 44 its hover circle was cut flat -->
                                 <StackPanel x:Name="MQuickApps" Orientation="Horizontal" HorizontalAlignment="Left" VerticalAlignment="Center"/>
                                 <StackPanel x:Name="MControls" Orientation="Horizontal" HorizontalAlignment="Center">
                                     <Button x:Name="PrevBtn" Style="{StaticResource Glyph}" Width="46" Height="44" Margin="0,0,8,0">
@@ -513,12 +526,15 @@
                                     <TextBlock Text="SHAZAMED" FontSize="10" FontWeight="Bold" Foreground="#0A84FF"/>
                                     <TextBlock x:Name="RadarTitle" Style="{StaticResource T1}" FontSize="17" Margin="0,2,0,0"/>
                                     <TextBlock x:Name="RadarArtist" Style="{StaticResource T2}"/>
-                                    <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
-                                        <Button x:Name="RadarSpotify" Style="{StaticResource Pill}" Background="#1DB954" Content="Spotify" Margin="0,0,6,0"/>
-                                        <Button x:Name="RadarYouTube" Style="{StaticResource Pill}" Background="#FF0033" Content="YouTube" Margin="0,0,6,0"/>
-                                        <Button x:Name="RadarCopy" Style="{StaticResource Pill}" Content="Copy" Margin="0,0,6,0"/>
-                                        <Button x:Name="RadarClose" Style="{StaticResource Pill}" Content="Done"/>
-                                    </StackPanel>
+                                    <Border Style="{StaticResource SegTrack}" Margin="0,10,0,0">
+                                        <UniformGrid Rows="1">
+                                            <!-- four equal segments in ~280 px: no side padding, or "YouTube" clips -->
+                                            <Button x:Name="RadarSpotify" Style="{StaticResource SegPrimary}" Padding="0" Content="Spotify"/>
+                                            <Button x:Name="RadarYouTube" Style="{StaticResource SegAction}" Padding="0" Content="YouTube"/>
+                                            <Button x:Name="RadarCopy" Style="{StaticResource SegAction}" Padding="0" Content="Copy"/>
+                                            <Button x:Name="RadarClose" Style="{StaticResource SegAction}" Padding="0" Content="Done"/>
+                                        </UniformGrid>
+                                    </Border>
                                 </StackPanel>
                             </Grid>
                         </Grid>
@@ -544,14 +560,16 @@
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
                             </Grid.RowDefinitions>
-                            <WrapPanel x:Name="TimerPresets"/>
+                            <Border Style="{StaticResource SegTrack}">
+                                <UniformGrid x:Name="TimerPresets" Rows="1"/>
+                            </Border>
                             <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,10,0,0" VerticalAlignment="Center">
                                 <TextBlock Text="Custom" Style="{StaticResource T2}" VerticalAlignment="Center" Margin="0,0,10,0"/>
                                 <TextBox x:Name="TimerMin" Style="{StaticResource Field}" Width="52" Text="10" TextAlignment="Center"/>
                                 <TextBlock Text="min" Style="{StaticResource Tiny}" VerticalAlignment="Center" Margin="6,0,10,0"/>
                                 <TextBox x:Name="TimerSec" Style="{StaticResource Field}" Width="52" Text="00" TextAlignment="Center"/>
                                 <TextBlock Text="sec" Style="{StaticResource Tiny}" VerticalAlignment="Center" Margin="6,0,14,0"/>
-                                <Button x:Name="TimerStartCustom" Style="{StaticResource Pill}" Background="#FF9F0A" Foreground="Black" Content="Start"/>
+                                <Button x:Name="TimerStartCustom" Style="{StaticResource SegPrimary}" Content="Start"/>
                             </StackPanel>
                         </Grid>
 
@@ -624,7 +642,7 @@
                         <TextBlock x:Name="ClipEmpty" Grid.Row="2" Text="Copy text, images, or drop files here" Style="{StaticResource T2}" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="Collapsed"/>
                         <Grid Grid.Row="3" Margin="0,4,0,0">
                             <TextBlock x:Name="ClipCount" Style="{StaticResource Tiny}" VerticalAlignment="Center"/>
-                            <Button x:Name="ClipMore" Style="{StaticResource Pill}" Padding="10,3" HorizontalAlignment="Right" Content="Load More" Visibility="Collapsed"/>
+                            <Button x:Name="ClipMore" Style="{StaticResource SegAction}" Background="#1C1C1E" Height="22" Padding="10,0" HorizontalAlignment="Right" Content="Load More" Visibility="Collapsed"/>
                         </Grid>
                     </Grid>
 
@@ -682,10 +700,12 @@
                         </Grid.RowDefinitions>
                         <TextBlock Text="Extracted Text" Style="{StaticResource T1}"/>
                         <TextBox x:Name="OcrText" Grid.Row="1" Margin="0,8" Style="{StaticResource Field}" IsReadOnly="True" TextWrapping="Wrap" VerticalContentAlignment="Top" VerticalScrollBarVisibility="Auto"/>
-                        <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right">
-                            <Button x:Name="OcrCopy" Style="{StaticResource Pill}" Background="#0A84FF" Content="Copy" Margin="0,0,8,0"/>
-                            <Button x:Name="OcrDismiss" Style="{StaticResource Pill}" Content="Dismiss"/>
-                        </StackPanel>
+                        <Border Grid.Row="2" Style="{StaticResource SegTrack}" HorizontalAlignment="Right">
+                            <UniformGrid Rows="1">
+                                <Button x:Name="OcrCopy" Style="{StaticResource SegPrimary}" Content="Copy"/>
+                                <Button x:Name="OcrDismiss" Style="{StaticResource SegAction}" Content="Dismiss"/>
+                            </UniformGrid>
+                        </Border>
                     </Grid>
 
                     <!-- ===== DROP ZONE ===== -->
@@ -735,11 +755,13 @@
                             <TextBlock x:Name="TourDesc" Style="{StaticResource T2}" TextWrapping="Wrap" TextTrimming="None" Margin="0,4,0,0"/>
                         </StackPanel>
                         <Grid Grid.Row="1" Grid.ColumnSpan="2" Margin="0,8,0,0">
-                            <Button x:Name="TourSkip" Style="{StaticResource Pill}" Background="Transparent" Foreground="{StaticResource Secondary}" Content="Skip" HorizontalAlignment="Left"/>
-                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                                <Button x:Name="TourBack" Style="{StaticResource Pill}" Content="Back" Margin="0,0,8,0"/>
-                                <Button x:Name="TourNext" Style="{StaticResource Pill}" Background="#0A84FF" Content="Next"/>
-                            </StackPanel>
+                            <Button x:Name="TourSkip" Style="{StaticResource SegAction}" Foreground="{StaticResource Secondary}" Content="Skip" HorizontalAlignment="Left"/>
+                            <Border Style="{StaticResource SegTrack}" HorizontalAlignment="Right">
+                                <UniformGrid Rows="1">
+                                    <Button x:Name="TourBack" Style="{StaticResource SegAction}" Content="Back"/>
+                                    <Button x:Name="TourNext" Style="{StaticResource SegPrimary}" Content="Next"/>
+                                </UniformGrid>
+                            </Border>
                         </Grid>
                     </Grid>
                 </Grid>
