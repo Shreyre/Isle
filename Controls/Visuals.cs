@@ -388,59 +388,198 @@ public sealed class EyesControl : FrameworkElement
 }
 
 /// Little companion that lives on the island: walks (wrapping round the ends), sits, sleeps, backflips, loves being petted.
+/// Every pose blends (speed, facing, sit, lie all ease) so nothing snaps. Shapes, brushes and pens are frozen and the
+/// per-part transforms are reused slots, so the 30 fps redraw allocates next to nothing.
 public sealed class PetControl : FrameworkElement
 {
     enum Mode { Walk, Sit, Sleep, Flip, Love }
     static readonly Random Rnd = new();
-    public string Kind { get; set; } = "Cat";
+
+    static Pen P(Brush b, double t) { var p = new Pen(b, t) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round, LineJoin = PenLineJoin.Round }; p.Freeze(); return p; }
+    static Geometry G(string data) { var g = Geometry.Parse(data); g.Freeze(); return g; }
+    static double Lerp(double a, double b, double t) => a + (b - a) * t;
+    static Point Rot(Point c, double dx, double dy, double deg)
+    {
+        double a = deg * Math.PI / 180, cos = Math.Cos(a), sin = Math.Sin(a);
+        return new Point(c.X + dx * cos - dy * sin, c.Y + dx * sin + dy * cos);
+    }
+
+    static readonly SolidColorBrush Ink = Ui.Brush(Color.FromRgb(30, 30, 30)), White = Ui.Brush(Colors.White),
+        Pink = Ui.Brush(Color.FromRgb(0xFF, 0x9E, 0xB1)), Heart = Ui.Brush(Color.FromRgb(0xFF, 0x37, 0x5F)), Hoof = Ui.Brush(Color.FromRgb(0x3A, 0x2A, 0x22));
+    static readonly Pen Thin = P(Ink, 1.0), BandEdge = P(Ui.Brush(Color.FromRgb(30, 22, 18), 0.85), 0.7),
+        Whisker = P(Ui.Brush(Colors.White, 0.7), 0.5), BubblePen = P(Ui.Brush(Colors.White, 0.85), 0.9);
+    // Soft radial fills: glossy eyes, cheeks that glow pink when petted, the ghost's halo.
+    static readonly Brush EyeFill = Radial(0.5, 0.75, 0.6, (0x4A3426, 1, 0), (0x140E0B, 1, 0.75)),
+        CheekSoft = Radial(0.5, 0.5, 0.5, (0xFF6F91, 0.35, 0), (0xFF6F91, 0, 1)),
+        CheekLove = Radial(0.5, 0.5, 0.5, (0xFF5C84, 0.75, 0), (0xFF5C84, 0, 1)),
+        GhostGlow = Radial(0.5, 0.5, 0.5, (0xE6ECFF, 0.4, 0.4), (0xE6ECFF, 0, 1));
+    static Color C(int rgb, double a = 1) => Color.FromArgb((byte)(255 * a), (byte)(rgb >> 16), (byte)(rgb >> 8), (byte)rgb);
+    static Brush Radial(double ox, double oy, double r, params (int rgb, double a, double at)[] stops)
+    {
+        var b = new RadialGradientBrush { GradientOrigin = new Point(ox, oy), Center = new Point(0.5, 0.5), RadiusX = r, RadiusY = r };
+        foreach (var s in stops) b.GradientStops.Add(new GradientStop(C(s.rgb, s.a), s.at));
+        b.Freeze();
+        return b;
+    }
+    static readonly FormattedText HeartText = Txt("♥", 9, Heart), ZText = Txt("z", 8, White);
+    static FormattedText Txt(string s, double size, Brush b) =>
+        new(s, CultureInfo.InvariantCulture, FlowDirection.LeftToRight, new Typeface(Ui.Font, FontStyles.Normal, FontWeights.Bold, FontStretches.Normal), size, b, 1.25);
+
+    // Part shapes in their own local space (head centre, tail root, fin root…), all drawn facing right.
+    static readonly Geometry CatEars = G("M-6.2,-2 L-5.2,-10.5 L-0.8,-5.2 Z M0.8,-5.2 L5.2,-10.5 L6.2,-2 Z"),
+        CatEarsIn = G("M-4.9,-4 L-4.5,-8.2 L-2.3,-5.4 Z M2.3,-5.4 L4.5,-8.2 L4.9,-4 Z"),
+        CatTail = G("M0,0 Q-7,-1 -5.5,-11"),
+        DogTail = G("M0,0 Q-4,-2 -4.5,-7.5"),
+        DogEar = G("M-3.5,-4.5 Q-8.5,-3 -7,3.5 Q-4,4.5 -2.5,-2 Z"),
+        BunnyEars = G("M-3.6,-4.5 Q-7.5,-12 -4.6,-17.5 Q-1.6,-12 -1.2,-5 Z M0.6,-5.2 Q0.6,-13 3.6,-17.6 Q5.6,-11 2.8,-4.6 Z"),
+        BunnyEarsIn = G("M-3.2,-6 Q-5.6,-12 -4.4,-15.6 Q-2.6,-11.5 -2.2,-6.2 Z M1.6,-6.2 Q1.8,-12.4 3.5,-15.6 Q4.4,-11 2.8,-6.4 Z"),
+        // horse: barrel with a raised rump, dip at the withers and a deep chest; neck/mane run along +x from the withers
+        HorseBody = G("M-12.4,-0.6 C-12.6,-5.6 -8.4,-7.2 -4,-6.2 C0,-5.4 5,-6.4 9,-5.6 C12.6,-4.8 13.6,0 11.6,3.4 C9.4,6.6 -4,7.2 -8.6,5.4 C-12,4 -12.3,2 -12.4,-0.6 Z"),
+        HorseNeck = G("M-1,-3.8 C4,-3.6 8,-2.8 11.6,-2.3 L11.6,2.3 C8,2.6 4,3.4 -1,4 Z"),
+        HorseMane = G("M-0.5,-3.6 Q1.6,-6.4 3,-3.5 Q4.8,-6.6 6.2,-3.1 Q8,-6.2 9.2,-2.8 Q11,-5.6 12,-2.4 L11.6,-1.6 C8,-2.4 4,-3 -0.5,-2.8 Z"),
+        HorseHead = G("M-4,-3.4 C-1,-4.2 3,-3 5.6,-1.6 C7.4,-0.6 7.6,2 5.8,2.8 C3.6,3.6 1,3 -1.5,3.6 C-4,4 -5.6,1.6 -5.2,-0.6 C-5,-2 -4.8,-3 -4,-3.4 Z"),
+        HorseBlaze = G("M-3.4,-3.5 C0,-3.9 3,-3 5.4,-1.5 L5.2,-0.9 C3,-2.2 0,-2.9 -3.4,-2.9 Z"),
+        HorseForelock = G("M-4.6,-3.2 Q-2.8,-5.4 -1,-3.6 Q-2.2,-2.2 -3.8,-1.6 Z"),
+        HorseEar = G("M-3.8,-2.6 L-3.4,-7.6 L-1.4,-3.4 Z"),
+        HorseEarFar = G("M-2.6,-3 L-1.6,-7.4 L-0.4,-3.4 Z"),
+        HorseTail = G("M0,0 C-3.2,0.6 -6.4,4 -6,9 C-5.8,12 -3.8,13.6 -2.2,13.2 C-3.4,10 -2.8,6 0.8,1.6 Z"),
+        // clownfish: rounded head (+x) tapering to the tail root, black-trimmed fins
+        FishBody = G("M9.6,0.4 C9.6,-4.4 5.4,-7 0,-7 C-5,-7 -8.6,-3.6 -10,0 C-8.6,3.6 -5,6.6 0,6.6 C5.4,6.6 9.6,4.6 9.6,0.4 Z"),
+        FishTail = G("M0,0 C-2,-3 -5,-6.5 -7.5,-6 C-8.6,-3 -8.6,3 -7.5,6 C-5,6.5 -2,3 0,0 Z"),
+        FishDorsal = G("M-6,-5.6 C-5,-9 -2,-9.6 -0.6,-7 C0.4,-9.6 4,-9.4 5.6,-5.8 Z"),
+        FishAnal = G("M-5.4,5.2 C-4.4,8.8 -1.2,8.8 0,6.2 Z"),
+        FishFin = G("M0,0 Q-1.5,3.5 -4.5,3.2 Q-3,1 0,0 Z");
+
+    string _kind = "";
+    Brush _fill = Ink, _shade = Ink, _accent = Ink, _cream = Ink;
+    Pen _limb = Thin, _farLimb = Thin, _limbThick = Thin, _farThick = Thin, _thickEdge = Thin, _tailPen = Thin, _neck = Thin, _accentPen = Thin, _edge = Thin, _limbEdge = Thin, _tailEdge = Thin, _neckEdge = Thin;
+    public string Kind
+    {
+        get => _kind;
+        set
+        {
+            if (value == _kind) return;
+            _kind = value;
+            switch (value)
+            {
+                //                    light     body      dark      edge      accent    cream
+                case "Dog": Palette(34, 30, 0xF8D6A4, 0xDDA25F, 0xB0763A, 0x7E5228, 0x9C6430, 0xFFF4E4, 2.3); break;
+                case "Bunny": Palette(34, 30, 0xFFFFFF, 0xF3F3F7, 0xC9C9D6, 0x9898A8, 0xFFB3C1, 0xFFFFFF, 2.4); break;
+                case "Ghost": Palette(34, 30, 0xFFFFFF, 0xEEF1FF, 0xBFC8F0, 0x97A2D8, 0xB7B7E0, 0xFFFFFF, 2.2, 0.9); break;
+                case "Horse": Palette(42, 36, 0xCB8C57, 0xA0602F, 0x6B3B1A, 0x47260F, 0x2E1B10, 0xFFF8F0, 2.2); _accent = Radial(0.32, 0.25, 0.62, (0x6A452C, 1, 0), (0x2E1B10, 1, 1)); break;
+                case "Fish": Palette(32, 26, 0xFFC27E, 0xFF8A2A, 0xDE5E08, 0xA8460A, 0xFFFFFF, 0xFFFFFF, 2.2); break;
+                default: Palette(34, 30, 0xFFD6AC, 0xF4A261, 0xD47A3A, 0x9A5527, 0xC9682A, 0xFFF1E0, 2.3); break;
+            }
+        }
+    }
+
+    /// Every body part is filled with one top-left-lit radial gradient (relative to the part's own bounds, so each
+    /// ear, head and leg gets its own highlight) and edged with a thin darker tint of the fur instead of black ink.
+    void Palette(double w, double h, int light, int body, int dark, int edge, int accent, int cream, double limb, double alpha = 1)
+    {
+        Width = w; Height = h;
+        _fill = Radial(0.32, 0.25, 0.62, (light, alpha, 0), (body, alpha, 0.5), (dark, alpha, 1));
+        _shade = Radial(0.32, 0.25, 0.62, (body, alpha, 0), (dark, alpha, 1));
+        _accent = Ui.Brush(C(accent));
+        _cream = Ui.Brush(C(cream), alpha);
+        var bodyB = Ui.Brush(C(body), alpha); var darkB = Ui.Brush(C(dark), alpha); var edgeB = Ui.Brush(C(edge), 0.8 * alpha);
+        _edge = P(edgeB, 0.9);
+        _limb = P(bodyB, limb); _farLimb = P(darkB, limb); _limbEdge = P(edgeB, limb + 1.4);
+        _limbThick = P(bodyB, limb + 1.4); _farThick = P(darkB, limb + 1.4); _thickEdge = P(edgeB, limb + 2.8);
+        _tailPen = P(bodyB, 2.8); _tailEdge = P(edgeB, 4.2);
+        _neck = P(bodyB, 5.8); _neckEdge = P(edgeB, 7.2);
+        _accentPen = P(Ui.Brush(C(accent), 0.75), 1.2);
+    }
+
+    /// Soft cheek glow, brighter while being petted.
+    void Cheeks(DrawingContext dc, double x1, double x2, double y, double r)
+    {
+        var b = _love > 0 ? CheekLove : CheekSoft;
+        dc.DrawEllipse(b, null, new Point(x1, y), r, r * 0.7);
+        if (!double.IsNaN(x2)) dc.DrawEllipse(b, null, new Point(x2, y), r, r * 0.7);
+    }
+
     public bool UpsideDown { get; set; }
     Mode _mode = Mode.Walk;
-    double _modeLeft = 4, _x, _dir = 1, _walkPhase, _flip, _fade = 1, _clock;
-    Point _cursor;
-    readonly List<(double x, double y, double life)> _hearts = new();
-    readonly List<(double x, double y, double life)> _zs = new();
+    double _modeLeft = 4, _x, _vx, _dir = 1, _face = 1, _faceTarget = 1, _gait, _swim, _flip, _fade = 1, _clock;
+    double _sit, _graze, _lie, _squash, _love, _blink, _blinkIn = 3, _twitch, _twitchIn = 5, _lookX, _lookY;
+    bool _flipped;
+    readonly List<(double x, double y, double life)> _hearts = new(), _zs = new();
+    readonly MatrixTransform[] _tf = { new(), new(), new(), new(), new(), new() };
+    static readonly ScaleTransform FlipY = Freeze(new ScaleTransform(1, -1));
+    static T Freeze<T>(T f) where T : Freezable { f.Freeze(); return f; }
 
-    public PetControl() { Width = 34; Height = 30; Cursor = Cursors.Hand; ToolTip = "Pet me!"; }
+    double Speed => _kind switch { "Horse" => 36, "Bunny" => 28, "Fish" => 22, "Ghost" => 18, _ => 24 };
+    double GaitRate => _kind switch { "Horse" => 12, "Bunny" => 7.5, "Dog" => 11, _ => 9.5 };
+    double Stride => Math.Min(1, Math.Abs(_vx) / Speed);
+
+    public PetControl() { Kind = "Cat"; Cursor = Cursors.Hand; ToolTip = "Pet me!"; RenderTransformOrigin = new Point(0.5, 0.5); }
 
     /// Called every frame with the island rect (in parent canvas coordinates).
     public void Tick(double dt, Rect island, bool islandBusy, Point cursorInCanvas)
     {
+        dt = Math.Min(dt, 0.1);
         _clock += dt;
-        _cursor = cursorInCanvas;
         _modeLeft -= dt;
         double left = island.Left - 6, right = island.Right - Width + 6;
         if (_x == 0) _x = (left + right) / 2;
 
-        switch (_mode)
-        {
-            case Mode.Walk:
-                _walkPhase += dt * 9;
-                _x += _dir * dt * 26;
-                // Magic edge wrap: fade out at one end, reappear at the other.
-                if (_x > right + 4) { _fade -= dt * 6; if (_fade <= 0) { _x = left; _fade = 0.01; } }
-                else if (_x < left - 4) { _fade -= dt * 6; if (_fade <= 0) { _x = right; _fade = 0.01; } }
-                else _fade = Math.Min(1, _fade + dt * 4);
-                if (_modeLeft <= 0) Next(islandBusy);
-                break;
-            case Mode.Flip:
-                _flip += dt * 2.2;
-                if (_flip >= 1) { _flip = 0; Set(Mode.Sit, 1.5); }
-                break;
-            default:
-                if (_modeLeft <= 0) Next(islandBusy);
-                break;
-        }
+        // Momentum: ease into and out of a walk instead of starting and stopping dead.
+        _vx = Ui.Ease(_vx, _mode == Mode.Walk ? _dir * Speed : 0, 5, dt);
+        _x += _vx * dt;
+        _gait += dt * GaitRate * Stride;
+        _swim += dt * Lerp(7 + Stride * 9, 2.5, _lie);
+        // Magic edge wrap: fade out at one end, reappear at the other.
+        if (_x > right + 4) { _fade -= dt * 6; if (_fade <= 0) { _x = left; _fade = 0.01; } }
+        else if (_x < left - 4) { _fade -= dt * 6; if (_fade <= 0) { _x = right; _fade = 0.01; } }
+        else _fade = Math.Min(1, _fade + dt * 4);
         _x = Math.Clamp(_x, left - 10, right + 10);
 
-        for (int i = _hearts.Count - 1; i >= 0; i--) { var h = _hearts[i]; h.y -= dt * 22; h.life -= dt; if (h.life <= 0) _hearts.RemoveAt(i); else _hearts[i] = h; }
-        if (_mode == Mode.Sleep && Rnd.NextDouble() < dt * 0.8) _zs.Add((Width * 0.7, 4, 1.6));
-        for (int i = _zs.Count - 1; i >= 0; i--) { var z = _zs[i]; z.y -= dt * 8; z.x += dt * 6; z.life -= dt; if (z.life <= 0) _zs.RemoveAt(i); else _zs[i] = z; }
+        if (_mode == Mode.Flip)
+        {
+            _flip += dt * 1.5;
+            if (_flip >= 1) { _flip = 0; _squash = 1; Set(Mode.Sit, 1.5); }
+        }
+        else if (_modeLeft <= 0) Next(islandBusy);
+
+        double top = UpsideDown ? island.Bottom - 2 : island.Top - Height + 3;
+        double cx = _x + Width / 2, cy = top + Height / 2;
+        // Walking faces the way it goes; otherwise it turns to watch a nearby cursor (not while asleep).
+        if (_mode == Mode.Walk) _faceTarget = _dir;
+        else if (_lie < 0.3 && Math.Abs(cursorInCanvas.X - cx) is > 8 and < 220 && Math.Abs(cursorInCanvas.Y - cy) < 140)
+            _faceTarget = cursorInCanvas.X > cx ? 1 : -1;
+        _face = Ui.Ease(_face, _faceTarget, 10, dt);
+        double sgn = _face < 0 ? -1 : 1;
+        _lookX = Ui.Ease(_lookX, Math.Clamp((cursorInCanvas.X - cx) / 60, -1, 1) * sgn, 8, dt);
+        _lookY = Ui.Ease(_lookY, Math.Clamp((cursorInCanvas.Y - cy) / 60, -1, 1) * (UpsideDown ? -1 : 1), 8, dt);
+
+        _sit = Ui.Ease(_sit, _mode == Mode.Sit || (_mode == Mode.Love && _kind != "Horse") ? 1 : 0, 6, dt);
+        _graze = Ui.Ease(_graze, _mode == Mode.Sit ? 1 : 0, 3, dt);
+        _lie = Ui.Ease(_lie, _mode == Mode.Sleep ? 1 : 0, 3, dt);
+        _squash = Math.Max(0, _squash - dt * 3.5);
+        _love = Math.Max(0, _love - dt);
+        _blinkIn -= dt; if (_blinkIn <= 0) { _blink = 0.14; _blinkIn = 2 + Rnd.NextDouble() * 4; }
+        _blink = Math.Max(0, _blink - dt);
+        _twitchIn -= dt; if (_twitchIn <= 0) { _twitch = 0.25; _twitchIn = 3 + Rnd.NextDouble() * 6; }
+        _twitch = Math.Max(0, _twitch - dt);
+
+        for (int i = _hearts.Count - 1; i >= 0; i--) { var h = _hearts[i]; h.y -= dt * 22; h.x += Math.Sin(h.life * 7) * dt * 10; h.life -= dt; if (h.life <= 0) _hearts.RemoveAt(i); else _hearts[i] = h; }
+        bool fish = _kind == "Fish";
+        if (fish) { if (Rnd.NextDouble() < dt * (_lie > 0.5 ? 1.2 : 0.45)) _zs.Add((Width / 2 + 9.5 * sgn, Height * 0.42, 2)); }
+        else if (_mode == Mode.Sleep && _lie > 0.6 && Rnd.NextDouble() < dt * 0.8) _zs.Add((sgn > 0 ? Width * 0.72 : Width * 0.12, 2, 1.6));
+        for (int i = _zs.Count - 1; i >= 0; i--)
+        {
+            var z = _zs[i];
+            z.y -= dt * (fish ? 10 : 8);
+            z.x += fish ? Math.Sin(z.life * 9) * dt * 6 : dt * 6 * sgn;
+            z.life -= dt;
+            if (z.life <= 0) _zs.RemoveAt(i); else _zs[i] = z;
+        }
 
         System.Windows.Controls.Canvas.SetLeft(this, _x);
-        System.Windows.Controls.Canvas.SetTop(this, UpsideDown ? island.Bottom - 2 : island.Top - Height + 3);
+        System.Windows.Controls.Canvas.SetTop(this, top);
         Opacity = Math.Clamp(_fade, 0, 1);
-        RenderTransformOrigin = new Point(0.5, 0.5);
-        RenderTransform = new ScaleTransform(1, UpsideDown ? -1 : 1);
+        if (_flipped != UpsideDown) { _flipped = UpsideDown; RenderTransform = UpsideDown ? FlipY : Transform.Identity; }
         InvalidateVisual();
     }
 
@@ -459,132 +598,312 @@ public sealed class PetControl : FrameworkElement
     {
         e.Handled = true;
         if (e.ClickCount >= 2) { _flip = 0; Set(Mode.Flip, 1); return; }
+        _love = 1.8;
         Set(Mode.Love, 1.8);
-        for (int i = 0; i < 3; i++) _hearts.Add((6 + Rnd.NextDouble() * 20, 4, 1.2 + i * 0.2));
+        for (int i = 0; i < 3; i++) _hearts.Add((6 + Rnd.NextDouble() * (Width - 14), 4, 1.2 + i * 0.2));
+    }
+
+    /// Pushes a reused transform: scale, then rotate (degrees), then move to (x, y). Each slot is used once per frame.
+    void Push(DrawingContext dc, int slot, double x, double y, double deg = 0, double sx = 1, double sy = 1)
+    {
+        var m = Matrix.Identity;
+        if (sx != 1 || sy != 1) m.Scale(sx, sy);
+        if (deg != 0) m.Rotate(deg);
+        m.Translate(x, y);
+        _tf[slot].Matrix = m;
+        dc.PushTransform(_tf[slot]);
+    }
+
+    void PushRotate(DrawingContext dc, int slot, double deg, double px, double py)
+    {
+        var m = Matrix.Identity;
+        m.RotateAt(deg, px, py);
+        _tf[slot].Matrix = m;
+        dc.PushTransform(_tf[slot]);
     }
 
     protected override void OnRender(DrawingContext dc)
     {
-        double w = Width, h = Height;
-        bool ghost = Kind == "Ghost";
-        Color body = Kind switch { "Dog" => Color.FromRgb(0xD9, 0xA0, 0x66), "Bunny" => Color.FromRgb(0xF2, 0xF2, 0xF2), "Ghost" => Color.FromArgb(235, 245, 245, 255), _ => Color.FromRgb(0xF4, 0xA2, 0x61) };
-        var fill = Ui.Brush(body);
-        var outline = new Pen(Ui.Brush(Color.FromRgb(30, 30, 30)), 1.2);
-        double facing = _mode == Mode.Walk ? _dir : (_cursor.X > System.Windows.Controls.Canvas.GetLeft(this) + w / 2 ? 1 : -1);
-
-        dc.PushTransform(new ScaleTransform(facing, 1, w / 2, h / 2));
+        double w = Width, h = Height, ground = h - 1;
+        // Flip = crouch, spin with a little stretch, then a springy landing squash.
+        double lift = 0, spin = 0, sx = 1, sy = 1;
         if (_mode == Mode.Flip)
         {
-            double a = _flip * 360, lift = Math.Sin(_flip * Math.PI) * 12;
-            dc.PushTransform(new TranslateTransform(0, -lift));
-            dc.PushTransform(new RotateTransform(-a, w / 2, h * 0.6));
-        }
-
-        bool sleeping = _mode == Mode.Sleep;
-        double bob = _mode == Mode.Walk ? Math.Abs(Math.Sin(_walkPhase)) * 1.2 : sleeping ? Math.Sin(_clock * 2) * 0.6 : 0;
-        if (ghost) bob = Math.Sin(_clock * 3) * 2;
-        double bodyY = h * 0.62 - bob;
-
-        if (ghost)
-        {
-            var g = new StreamGeometry();
-            using (var c = g.Open())
-            {
-                c.BeginFigure(new Point(w * 0.2, h * 0.95 - bob), true, true);
-                c.LineTo(new Point(w * 0.2, h * 0.45 - bob), true, true);
-                c.ArcTo(new Point(w * 0.8, h * 0.45 - bob), new Size(w * 0.3, h * 0.35), 0, false, SweepDirection.Clockwise, true, true);
-                c.LineTo(new Point(w * 0.8, h * 0.95 - bob), true, true);
-                for (int i = 0; i < 4; i++)
-                    c.LineTo(new Point(w * (0.8 - (i + 0.5) * 0.15), h * (i % 2 == 0 ? 0.85 : 0.95) - bob), true, true);
-            }
-            dc.DrawGeometry(fill, outline, g);
-        }
-        else
-        {
-            // legs
-            var legPen = new Pen(Ui.Brush(Color.FromRgb(30, 30, 30)), 2.4) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round };
-            if (!sleeping)
-                for (int i = 0; i < 4; i++)
-                {
-                    double lx = w * (0.3 + i * 0.12);
-                    double swing = _mode == Mode.Walk ? Math.Sin(_walkPhase + i * Math.PI / 2) * 2.5 : 0;
-                    dc.DrawLine(legPen, new Point(lx, bodyY + 3), new Point(lx + swing, h - 1));
-                }
-            // tail
-            var tailPen = new Pen(fill, Kind == "Bunny" ? 0.1 : 3) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round };
-            if (Kind == "Bunny") dc.DrawEllipse(fill, outline, new Point(w * 0.18, bodyY - 1), 3.5, 3.5);
+            if (_flip < 0.2) { double c = Math.Sin(_flip / 0.2 * Math.PI / 2); sy = 1 - 0.22 * c; sx = 1 + 0.12 * c; }
             else
             {
-                double wag = Math.Sin(_clock * (Kind == "Dog" ? 14 : 3)) * 3;
-                var tg = new StreamGeometry();
-                using (var c = tg.Open())
-                {
-                    c.BeginFigure(new Point(w * 0.22, bodyY - 2), false, false);
-                    c.QuadraticBezierTo(new Point(w * 0.05, bodyY - 6), new Point(w * 0.08 + wag * 0.3, bodyY - (Kind == "Dog" ? 8 : 13) + wag), true, true);
-                }
-                dc.DrawGeometry(null, new Pen(Ui.Brush(Color.FromRgb(30, 30, 30)), 4.6) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round }, tg);
-                dc.DrawGeometry(null, tailPen, tg);
+                double u = Math.Min(1, (_flip - 0.2) / 0.7), arc = Math.Sin(u * Math.PI);
+                lift = arc * 13; spin = -360 * u * u * (3 - 2 * u); sy = 1 + 0.08 * arc; sx = 1 - 0.05 * arc;
             }
-            // body
-            dc.DrawEllipse(fill, outline, new Point(w * 0.47, bodyY), w * 0.3, sleeping ? h * 0.2 : h * 0.22);
-            // head
-            double hx = w * 0.74, hy = sleeping ? bodyY + 1 : bodyY - h * 0.22;
-            // ears
-            var earG = new StreamGeometry();
-            using (var c = earG.Open())
-            {
-                if (Kind == "Bunny")
-                {
-                    c.BeginFigure(new Point(hx - 3, hy - 5), true, true); c.LineTo(new Point(hx - 5, hy - 17), true, true); c.LineTo(new Point(hx - 0.5, hy - 6), true, true);
-                    c.BeginFigure(new Point(hx + 1, hy - 5), true, true); c.LineTo(new Point(hx + 3, hy - 17), true, true); c.LineTo(new Point(hx + 4, hy - 5), true, true);
-                }
-                else if (Kind == "Dog")
-                {
-                    c.BeginFigure(new Point(hx - 5, hy - 4), true, true); c.LineTo(new Point(hx - 8, hy + 4), true, true); c.LineTo(new Point(hx - 3, hy + 2), true, true);
-                }
-                else
-                {
-                    c.BeginFigure(new Point(hx - 6, hy - 3), true, true); c.LineTo(new Point(hx - 5, hy - 10), true, true); c.LineTo(new Point(hx - 1, hy - 5), true, true);
-                    c.BeginFigure(new Point(hx + 1, hy - 5), true, true); c.LineTo(new Point(hx + 5, hy - 10), true, true); c.LineTo(new Point(hx + 6, hy - 3), true, true);
-                }
-            }
-            dc.DrawGeometry(fill, outline, earG);
-            dc.DrawEllipse(fill, outline, new Point(hx, hy), 7, 6.2);
-            DrawFace(dc, hx + 1.5, hy, sleeping);
         }
-        if (ghost) DrawFace(dc, w / 2, h * 0.55 - bob, sleeping);
-
-        if (_mode == Mode.Flip) { dc.Pop(); dc.Pop(); }
+        if (_squash > 0) { double k = _squash * _squash * Math.Cos((1 - _squash) * 9); sy *= 1 - 0.2 * k; sx *= 1 + 0.14 * k; }
+        if (_love > 0) lift += Math.Abs(Math.Sin(_love * 7)) * 3 * Math.Min(1, _love);
+        // Facing mirrors about the centre and never quite reaches zero, so turning round reads as a quick squish.
+        double f = Math.Abs(_face) < 0.2 ? (_face < 0 ? -0.2 : 0.2) : _face;
+        var m = Matrix.Identity;
+        m.ScaleAt(sx, sy, w / 2, ground);
+        if (spin != 0) m.RotateAt(spin, w / 2, h * 0.55);
+        m.Translate(0, -lift);
+        m.ScaleAt(f, 1, w / 2, 0);
+        _tf[0].Matrix = m;
+        dc.PushTransform(_tf[0]);
+        switch (_kind)
+        {
+            case "Ghost": DrawGhost(dc, w, h); break;
+            case "Fish": DrawFish(dc, w, h); break;
+            case "Horse": DrawHorse(dc, w, ground); break;
+            default: DrawQuad(dc, w, ground); break;
+        }
         dc.Pop();
 
-        var heart = Ui.Brush(Color.FromRgb(0xFF, 0x37, 0x5F));
-        foreach (var hrt in _hearts) DrawText(dc, "♥", hrt.x, hrt.y, 9, heart, Math.Min(1, hrt.life));
-        foreach (var z in _zs) DrawText(dc, "z", z.x, z.y, 8, Brushes.White, Math.Min(1, z.life));
+        foreach (var hrt in _hearts) { dc.PushOpacity(Math.Min(1, hrt.life)); dc.DrawText(HeartText, new Point(hrt.x, hrt.y)); dc.Pop(); }
+        bool fish = _kind == "Fish";
+        foreach (var z in _zs)
+        {
+            dc.PushOpacity(Math.Min(1, z.life));
+            if (fish) { double r = 1.1 + (2 - z.life) * 0.5; dc.DrawEllipse(null, BubblePen, new Point(z.x, z.y), r, r); }
+            else dc.DrawText(ZText, new Point(z.x, z.y));
+            dc.Pop();
+        }
     }
 
-    void DrawFace(DrawingContext dc, double cx, double cy, bool sleeping)
+    /// Cat, dog and bunny: trotting diagonal leg pairs (the bunny hops), sit tilts the body back, sleep curls up.
+    void DrawQuad(DrawingContext dc, double w, double ground)
     {
-        var dark = Ui.Brush(Color.FromRgb(25, 25, 25));
-        if (sleeping || _mode == Mode.Love)
+        bool dog = _kind == "Dog", bunny = _kind == "Bunny";
+        double rx = dog ? 10.5 : bunny ? 8.6 : 10, ry = dog ? 6.6 : bunny ? 7 : 6.2, leg = bunny ? 3.6 : 6;
+        double stride = Stride, breathe = 1 + Math.Sin(_clock * (_lie > 0.5 ? 1.7 : 2.6)) * (0.02 + 0.04 * _lie);
+        double hop = bunny ? Math.Max(0, Math.Sin(_gait)) * 5 * stride : Math.Abs(Math.Sin(_gait)) * 0.9 * stride;
+        double tilt = -_sit * (bunny ? 10 : 16);
+        var c = new Point(w * 0.45, Lerp(ground - leg - ry * 0.55, ground - ry * 0.85, _lie) + _sit * 1.2 - hop);
+
+        // legs: far pair shaded, near pair in front; diagonal pairs share a phase
+        for (int i = 0; i < 4; i++)
         {
-            var p = new Pen(dark, 1.1) { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round };
-            dc.DrawLine(p, new Point(cx - 4, cy - 1), new Point(cx - 1.5, cy - (_mode == Mode.Love ? 2 : 1)));
-            dc.DrawLine(p, new Point(cx + 1.5, cy - (_mode == Mode.Love ? 2 : 1)), new Point(cx + 4, cy - 1));
+            bool front = (i & 1) == 1, near = i >= 2;
+            double ph = front ^ near ? 0 : Math.PI;
+            var hip = Rot(c, (front ? rx * 0.55 : -rx * 0.55) + (near ? 1.2 : -1.2), ry * 0.45, tilt);
+            double s = Math.Sin(_gait + ph), up = Math.Max(0, Math.Cos(_gait + ph)), fx, fy;
+            if (bunny) { fx = hip.X + (front ? 1.5 : -1.5) * hop / 5; fy = Math.Min(ground, hip.Y + leg + 1.5); }
+            else { fx = hip.X + s * 2.6 * stride; fy = ground - up * 2 * stride; }
+            fx = Lerp(fx, hip.X + (front ? 0.5 : 3), _sit); fy = Lerp(fy, ground, _sit);
+            fx = Lerp(fx, hip.X + (front ? 7 : 2), _lie); fy = Lerp(fy, front ? ground - 1 : hip.Y + 0.5, _lie);
+            var foot = new Point(fx, fy);
+            dc.DrawLine(_limbEdge, hip, foot);
+            dc.DrawLine(near ? _limb : _farLimb, hip, foot);
+        }
+
+        if (!bunny)
+        {
+            var tb = Rot(c, -rx * 0.88, -ry * 0.15, tilt);
+            double wag = dog ? Math.Sin(_clock * (_love > 0 ? 24 : 13)) * (_lie > 0.5 ? 4 : 16)
+                             : Math.Sin(_clock * 2.2) * 10 + Math.Sin(_gait) * 6 * stride;
+            Push(dc, 1, tb.X, tb.Y, tilt + wag - _lie * (dog ? 40 : 75));
+            var g = dog ? DogTail : CatTail;
+            dc.DrawGeometry(null, _tailEdge, g);
+            dc.DrawGeometry(null, _tailPen, g);
+            dc.Pop();
+        }
+
+        Push(dc, 2, c.X, c.Y, tilt);
+        double bry = ry * breathe;
+        dc.DrawEllipse(_fill, _edge, new Point(0, 0), rx, bry);
+        if (dog) dc.DrawEllipse(_accent, null, new Point(-3, -2.6), 3.2, 2.4);
+        else if (!bunny)
+        {
+            dc.DrawLine(_accentPen, new Point(-4, -bry * 0.92 + 0.4), new Point(-3.4, -bry * 0.92 + 3));
+            dc.DrawLine(_accentPen, new Point(0, -bry + 0.4), new Point(0.5, -bry + 3));
+            dc.DrawLine(_accentPen, new Point(3.6, -bry * 0.93 + 0.4), new Point(4, -bry * 0.93 + 2.6));
+        }
+        dc.Pop();
+        if (bunny) dc.DrawEllipse(_fill, _edge, Rot(c, -rx * 0.95, -ry * 0.1, tilt), 3.4, 3.4);
+
+        var hc = Rot(c, dog ? 10 : bunny ? 8 : 9.5, dog ? -5 : bunny ? -6 : -5.5, tilt);
+        // lying down rests the chin on the ground just ahead of the body
+        hc = new Point(hc.X + _lie * 1.5, Lerp(hc.Y, ground - 5.6, _lie) + Math.Sin(_gait * 2) * 0.5 * stride);
+        double hAng = _sit * 9 * Math.Sin(_clock * 0.9) + (_love > 0 ? Math.Sin(_love * 12) * 9 : 0) + _lie * 8;
+        Push(dc, 3, hc.X, hc.Y, hAng);
+        if (!dog)
+        {
+            double earAng = (bunny ? -_lie * 55 + Math.Sin(_gait) * 6 * stride : 0) + (_twitch > 0 ? Math.Sin(_twitch * 50) * 7 : 0);
+            PushRotate(dc, 4, earAng, 0, -4);
+            dc.DrawGeometry(_fill, _edge, bunny ? BunnyEars : CatEars);
+            dc.DrawGeometry(bunny ? _accent : Pink, null, bunny ? BunnyEarsIn : CatEarsIn);
+            dc.Pop();
+        }
+        dc.DrawEllipse(_fill, _edge, new Point(0, 0), dog ? 7 : bunny ? 6.4 : 6.8, dog ? 6.4 : 6);
+        if (dog)
+        {
+            dc.DrawEllipse(_cream, _edge, new Point(5, 2), 3.4, 2.6);
+            dc.DrawEllipse(Ink, null, new Point(7.8, 1.2), 1.3, 1);
+            dc.DrawEllipse(White, null, new Point(7.4, 0.8), 0.45, 0.3);
+            PushRotate(dc, 4, Math.Sin(_gait * 2) * 12 * stride + (_love > 0 ? Math.Sin(_love * 12) * 10 : 0) + _lie * 10, -3, -4);
+            dc.DrawGeometry(_accent, _edge, DogEar);
+            dc.Pop();
         }
         else
         {
-            dc.DrawEllipse(dark, null, new Point(cx - 2.6, cy - 1), 1.2, 1.5);
-            dc.DrawEllipse(dark, null, new Point(cx + 2.6, cy - 1), 1.2, 1.5);
+            dc.DrawEllipse(_cream, null, new Point(2, 2.6), 3.4, 2.4);
+            dc.DrawEllipse(Pink, null, new Point(1.8, 1.6), 1.1, 0.75);
+            if (!bunny)
+            {
+                dc.DrawLine(Whisker, new Point(4, 1.6), new Point(9, 0.8));
+                dc.DrawLine(Whisker, new Point(4, 2.4), new Point(9, 3));
+            }
         }
-        dc.DrawEllipse(Ui.Brush(Color.FromRgb(0xFF, 0x8F, 0xA3)), null, new Point(cx, cy + 1.6), 1, 0.7);
+        double ey = dog ? -1.6 : -1;
+        Cheeks(dc, -3.2, 5.8, 2.2, 1.9);
+        Eye(dc, -0.9, ey, 1.5);
+        Eye(dc, 3.8, ey, 1.5);
+        dc.Pop();
     }
 
-    static void DrawText(DrawingContext dc, string s, double x, double y, double size, Brush b, double alpha)
+    /// Horse: jointed legs that trot, a flowing tail, a maned neck that arches up or drops to graze ("sitting").
+    void DrawHorse(DrawingContext dc, double w, double ground)
     {
-        dc.PushOpacity(alpha);
-        var ft = new FormattedText(s, CultureInfo.InvariantCulture, FlowDirection.LeftToRight, new Typeface(Ui.Font, FontStyles.Normal, FontWeights.Bold, FontStretches.Normal), size, b, 1.25);
-        dc.DrawText(ft, new Point(x, y));
+        const double rx = 12.5, ry = 6.4, leg = 12;
+        double stride = Stride, breathe = 1 + Math.Sin(_clock * (_lie > 0.5 ? 1.6 : 2.2)) * (0.02 + 0.03 * _lie);
+        var c = new Point(w * 0.42, Lerp(ground - leg - ry * 0.5, ground - ry * 0.9, _lie) - Math.Abs(Math.Sin(_gait)) * 1.4 * stride);
+
+        // far legs, then the tail, then near legs, so the near hind leg sits in front of the tail
+        for (int i = 0; i < 4; i++)
+        {
+            if (i == 2)
+            {
+                Push(dc, 1, c.X - rx * 0.9, c.Y - ry * 0.55, Math.Sin(_clock * 1.7) * 9 + stride * 30 + Math.Sin(_gait) * 6 * stride + _lie * 45);
+                dc.DrawGeometry(_accent, _edge, HorseTail);
+                dc.Pop();
+            }
+            bool front = (i & 1) == 1, near = i >= 2;
+            double ph = front ^ near ? 0 : Math.PI;
+            var hip = new Point(c.X + (front ? rx * 0.62 : -rx * 0.6) + (near ? 1.4 : -1.4), c.Y + ry * 0.35);
+            double s = Math.Sin(_gait + ph), up = Math.Max(0, Math.Cos(_gait + ph));
+            double fx = Lerp(hip.X + s * 4.2 * stride, hip.X + (front ? 6 : 4), _lie);
+            double fy = Lerp(ground - up * 3.4 * stride, ground - 1, _lie);
+            // knees bend forward on the front legs, hocks backward on the hind ones
+            double bend = Lerp((front ? 1 : -1) * (1.2 + up * 2.4 * stride), front ? -2.5 : 2.5, _lie);
+            var foot = new Point(fx, fy - 1);
+            var knee = new Point((hip.X + fx) / 2 + bend, (hip.Y + fy) / 2);
+            dc.DrawLine(_thickEdge, hip, knee); dc.DrawLine(_limbEdge, knee, foot);
+            dc.DrawLine(near ? _limbThick : _farThick, hip, knee); dc.DrawLine(near ? _limb : _farLimb, knee, foot);
+            dc.DrawEllipse(Hoof, null, new Point(fx, fy - 0.8), 1.7, 1.2);
+        }
+
+        // neck swings from raised (standing) to down in the grass (grazing); the head munches while it grazes
+        var nb = new Point(c.X + rx * 0.6, c.Y - ry * 0.45);
+        double munch = Math.Sin(_clock * 7) * 3 * _graze;
+        double na = Lerp(Lerp(-58, 50, _graze), -32, _lie) + Math.Sin(_gait * 2) * 4 * stride + (_love > 0 ? Math.Sin(_love * 10) * 6 : 0);
+        double nr = na * Math.PI / 180;
+        var nt = new Point(nb.X + Math.Cos(nr) * 11, nb.Y + Math.Sin(nr) * 11);
+        Push(dc, 5, nb.X, nb.Y, na);
+        dc.DrawGeometry(_fill, _edge, HorseNeck);
+        dc.DrawGeometry(_accent, null, HorseMane);
         dc.Pop();
+
+        Push(dc, 2, c.X, c.Y, 0, 1, breathe);
+        dc.DrawGeometry(_fill, _edge, HorseBody);
+        dc.Pop();
+
+        double ha = 22 + _graze * 48 + _lie * 10 + munch, hr = ha * Math.PI / 180;
+        Push(dc, 3, nt.X + Math.Cos(hr) * 3, nt.Y + Math.Sin(hr) * 3, ha);
+        PushRotate(dc, 4, _twitch > 0 ? Math.Sin(_twitch * 50) * 10 : 0, -2.6, -3);
+        dc.DrawGeometry(_shade, _edge, HorseEarFar);
+        dc.DrawGeometry(_fill, _edge, HorseEar);
+        dc.Pop();
+        dc.DrawGeometry(_fill, _edge, HorseHead);
+        dc.PushClip(HorseHead);
+        dc.DrawEllipse(_shade, null, new Point(6.2, 1), 2.9, 3.4);   // darker muzzle
+        dc.Pop();
+        dc.DrawGeometry(_cream, null, HorseBlaze);
+        dc.DrawEllipse(Hoof, null, new Point(6.3, 0.5), 0.7, 0.55);   // nostril
+        dc.DrawGeometry(_accent, null, HorseForelock);
+        Cheeks(dc, 1, double.NaN, 1.8, 1.6);
+        Eye(dc, -1.5, -0.8, 1.4);
+        dc.Pop();
+    }
+
+    /// Clownfish swimming in the air above the island: three white bands, black-trimmed fins, a fanning tail, bubbles.
+    void DrawFish(DrawingContext dc, double w, double h)
+    {
+        var c = new Point(w * 0.52, h * 0.5 + Math.Sin(_clock * 2.1) * 1.6 + _lie * 3);
+        Push(dc, 2, c.X, c.Y, Math.Sin(_clock * 1.3) * 4 + Math.Sin(_swim) * 2 + (_love > 0 ? Math.Sin(_love * 14) * 8 : 0));
+        // the tail swings and foreshortens as it beats
+        Push(dc, 4, -9.2, 0, Math.Sin(_swim) * 20, 1 - Math.Abs(Math.Sin(_swim)) * 0.2);
+        dc.DrawGeometry(_fill, BandEdge, FishTail);
+        dc.Pop();
+        dc.DrawGeometry(_fill, BandEdge, FishDorsal);
+        dc.DrawGeometry(_fill, BandEdge, FishAnal);
+        dc.DrawGeometry(_fill, null, FishBody);
+        dc.PushClip(FishBody);
+        dc.DrawEllipse(White, BandEdge, new Point(3.4, 0), 1.9, 9);
+        dc.DrawEllipse(White, BandEdge, new Point(-3, 0), 2.2, 9);
+        dc.DrawEllipse(White, BandEdge, new Point(-9.8, 0), 1.4, 6);
+        dc.Pop();
+        dc.DrawGeometry(null, _edge, FishBody);
+        Push(dc, 5, 1.2, 2.4, Math.Sin(_swim * 1.3) * 25);
+        dc.DrawGeometry(_fill, BandEdge, FishFin);
+        dc.Pop();
+        dc.DrawLine(Thin, new Point(8.4, 2.2), new Point(9.4, 1.6));
+        Cheeks(dc, 7.2, double.NaN, 1.8, 1.4);
+        if (_lie <= 0.4 && _love <= 0 && _blink <= 0) dc.DrawEllipse(White, BandEdge, new Point(6.3, -1.8), 2.1, 2.1);
+        Eye(dc, 6.3, -1.8, 1.5);
+        dc.Pop();
+    }
+
+    /// Ghost: floats and leans into its drift, rippling hem, waving nubs.
+    void DrawGhost(DrawingContext dc, double w, double h)
+    {
+        double breathe = 1 + Math.Sin(_clock * 2) * 0.03;
+        var c = new Point(w / 2, h * 0.5 + Math.Sin(_clock * 2.4) * 2 + _lie * 3);
+        Push(dc, 2, c.X, c.Y, Stride * 9 + (_love > 0 ? Math.Sin(_love * 10) * 8 : 0), 2 - breathe, breathe);
+        double wave = Math.Sin(_clock * 4) * 1.2;
+        dc.DrawEllipse(GhostGlow, null, new Point(0, 0), 17, 16);
+        dc.DrawEllipse(_fill, _edge, new Point(-9.4, 2 + wave), 2.2, 3);
+        dc.DrawEllipse(_fill, _edge, new Point(9.4, 2 - wave), 2.2, 3);
+        var g = new StreamGeometry();
+        using (var ctx = g.Open())
+        {
+            double y0 = 9 + Math.Sin(_clock * 5 + 7.8) * 1.1;
+            ctx.BeginFigure(new Point(-9, y0), true, true);
+            ctx.LineTo(new Point(-9, -2), true, true);
+            ctx.ArcTo(new Point(9, -2), new Size(9, 10), 0, false, SweepDirection.Clockwise, true, true);
+            ctx.LineTo(new Point(9, 9), true, true);
+            for (int i = 1; i <= 6; i++)
+            {
+                double x = 9 - i * 3, y = 9 + Math.Sin(_clock * 5 + i * 1.3) * 1.1;
+                ctx.QuadraticBezierTo(new Point(x + 1.5, y + 3.2), new Point(x, y), true, true);
+            }
+        }
+        dc.DrawGeometry(_fill, _edge, g);
+        Cheeks(dc, -5, 6.2, 0.4, 2);
+        Eye(dc, -2.4, -3, 1.8);
+        Eye(dc, 3.6, -3, 1.8);
+        if (_love > 0) dc.DrawEllipse(Ink, null, new Point(0.6, 1.6), 1.1, 1.4);
+        dc.Pop();
+    }
+
+    /// Open eyes follow the cursor and blink; asleep = closed arcs, petted = happy ^ ^.
+    void Eye(DrawingContext dc, double x, double y, double r)
+    {
+        if (_lie > 0.4)
+        {
+            dc.DrawLine(Thin, new Point(x - r, y - 0.2), new Point(x, y + 0.6));
+            dc.DrawLine(Thin, new Point(x, y + 0.6), new Point(x + r, y - 0.2));
+        }
+        else if (_love > 0)
+        {
+            dc.DrawLine(Thin, new Point(x - r, y + 0.5), new Point(x, y - 0.8));
+            dc.DrawLine(Thin, new Point(x, y - 0.8), new Point(x + r, y + 0.5));
+        }
+        else if (_blink > 0) dc.DrawLine(Thin, new Point(x - r, y), new Point(x + r, y));
+        else
+        {
+            var p = new Point(x + _lookX * 0.5, y + _lookY * 0.4);
+            // glossy: warm dark iris, a big catch-light and a small bounce light
+            dc.DrawEllipse(EyeFill, null, p, r * 0.85, r);
+            dc.DrawEllipse(White, null, new Point(p.X - r * 0.28, p.Y - r * 0.38), r * 0.36, r * 0.36);
+            dc.DrawEllipse(White, null, new Point(p.X + r * 0.32, p.Y + r * 0.42), r * 0.15, r * 0.15);
+        }
     }
 }
 

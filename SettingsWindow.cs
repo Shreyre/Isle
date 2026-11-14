@@ -187,7 +187,7 @@ public sealed class SettingsWindow : Window
         Tog("Position", "Companion", "Virtual Island Companion (Pet)", "Adds a lively interactive desktop pet walking and sleeping on top of your island dock.",
             () => S.IslandPetEnabled, v => S.IslandPetEnabled = v);
         Seg("Position", "Companion", "Companion Type", "Choose which creature lives on your island.",
-            new[] { "Cat", "Dog", "Bunny", "Ghost" }, new[] { "Cat", "Dog", "Bunny", "Ghost" }, () => S.IslandPetType, v => S.IslandPetType = v);
+            new[] { "Cat", "Dog", "Bunny", "Horse", "Fish", "Ghost" }, new[] { "Cat", "Dog", "Bunny", "Horse", "Fish", "Ghost" }, () => S.IslandPetType, v => S.IslandPetType = v);
 
         // Monitors & Displays
         Add("Monitors", "", "Target Display Monitor", "Select which monitor the Dynamic Island should dock to.",

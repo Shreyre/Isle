@@ -77,7 +77,7 @@ public sealed class AppSettings
     public bool ShowQuickApp2InMedia { get; set; } = true;
     public bool ShowQuickApp3InMedia { get; set; } = true;
     public bool IslandPetEnabled { get; set; }
-    public string IslandPetType { get; set; } = "Cat";         // Cat, Dog, Bunny, Ghost
+    public string IslandPetType { get; set; } = "Cat";         // Cat, Dog, Bunny, Horse, Fish, Ghost
 
     // Clipboard
     public bool ClipboardEnabled { get; set; } = true;
