@@ -407,7 +407,7 @@ public sealed class PetControl : FrameworkElement
     static readonly SolidColorBrush Ink = Ui.Brush(Color.FromRgb(30, 30, 30)), White = Ui.Brush(Colors.White),
         Pink = Ui.Brush(Color.FromRgb(0xFF, 0x9E, 0xB1)), Heart = Ui.Brush(Color.FromRgb(0xFF, 0x37, 0x5F)), Hoof = Ui.Brush(Color.FromRgb(0x3A, 0x2A, 0x22));
     static readonly Pen Thin = P(Ink, 1.0), BandEdge = P(Ui.Brush(Color.FromRgb(30, 22, 18), 0.85), 0.7),
-        Whisker = P(Ui.Brush(Colors.White, 0.7), 0.5), BubblePen = P(Ui.Brush(Colors.White, 0.85), 0.9);
+        Whisker = P(Ui.Brush(Colors.White, 0.7), 0.5), BubblePen = P(Ui.Brush(Colors.White, 0.85), 0.9), ManeShine = P(Ui.Brush(Colors.White, 0.55), 0.6), MouthPen = P(Ui.Brush(Color.FromRgb(60, 34, 20), 0.75), 0.7);
     // Soft radial fills: glossy eyes, cheeks that glow pink when petted, the ghost's halo.
     static readonly Brush EyeFill = Radial(0.5, 0.75, 0.6, (0x4A3426, 1, 0), (0x140E0B, 1, 0.75)),
         CheekSoft = Radial(0.5, 0.5, 0.5, (0xFF6F91, 0.35, 0), (0xFF6F91, 0, 1)),
@@ -434,15 +434,14 @@ public sealed class PetControl : FrameworkElement
         BunnyEars = G("M-3.6,-4.5 Q-7.5,-12 -4.6,-17.5 Q-1.6,-12 -1.2,-5 Z M0.6,-5.2 Q0.6,-13 3.6,-17.6 Q5.6,-11 2.8,-4.6 Z"),
         BunnyEarsIn = G("M-3.2,-6 Q-5.6,-12 -4.4,-15.6 Q-2.6,-11.5 -2.2,-6.2 Z M1.6,-6.2 Q1.8,-12.4 3.5,-15.6 Q4.4,-11 2.8,-6.4 Z"),
         // horse: barrel with a raised rump, dip at the withers and a deep chest; neck/mane run along +x from the withers
-        HorseBody = G("M-12.4,-0.6 C-12.6,-5.6 -8.4,-7.2 -4,-6.2 C0,-5.4 5,-6.4 9,-5.6 C12.6,-4.8 13.6,0 11.6,3.4 C9.4,6.6 -4,7.2 -8.6,5.4 C-12,4 -12.3,2 -12.4,-0.6 Z"),
-        HorseNeck = G("M-1,-3.8 C4,-3.6 8,-2.8 11.6,-2.3 L11.6,2.3 C8,2.6 4,3.4 -1,4 Z"),
-        HorseMane = G("M-0.5,-3.6 Q1.6,-6.4 3,-3.5 Q4.8,-6.6 6.2,-3.1 Q8,-6.2 9.2,-2.8 Q11,-5.6 12,-2.4 L11.6,-1.6 C8,-2.4 4,-3 -0.5,-2.8 Z"),
-        HorseHead = G("M-4,-3.4 C-1,-4.2 3,-3 5.6,-1.6 C7.4,-0.6 7.6,2 5.8,2.8 C3.6,3.6 1,3 -1.5,3.6 C-4,4 -5.6,1.6 -5.2,-0.6 C-5,-2 -4.8,-3 -4,-3.4 Z"),
-        HorseBlaze = G("M-3.4,-3.5 C0,-3.9 3,-3 5.4,-1.5 L5.2,-0.9 C3,-2.2 0,-2.9 -3.4,-2.9 Z"),
-        HorseForelock = G("M-4.6,-3.2 Q-2.8,-5.4 -1,-3.6 Q-2.2,-2.2 -3.8,-1.6 Z"),
-        HorseEar = G("M-3.8,-2.6 L-3.4,-7.6 L-1.4,-3.4 Z"),
-        HorseEarFar = G("M-2.6,-3 L-1.6,-7.4 L-0.4,-3.4 Z"),
-        HorseTail = G("M0,0 C-3.2,0.6 -6.4,4 -6,9 C-5.8,12 -3.8,13.6 -2.2,13.2 C-3.4,10 -2.8,6 0.8,1.6 Z"),
+        // horse (chibi pony): short thick neck along +x, pointed ears, fluffy forelock and tail
+        HorseNeck = G("M-1.5,-5 C3,-4.8 6,-4.2 8.8,-4 L8.8,4 C6,4.4 3,5.2 -1.5,5.6 Z"),
+        HorseEar = G("M-3.4,-3.6 Q-4.6,-8.8 -2.2,-9.6 Q-0.8,-6.8 -0.4,-4.6 Z"),
+        HorseEarIn = G("M-2.9,-4.6 Q-3.6,-7.8 -2.3,-8.4 Q-1.5,-6.6 -1.2,-5 Z"),
+        HorseEarFar = G("M-0.2,-4.4 Q0.4,-9.2 2.6,-9.2 Q2.8,-6.4 2.4,-4 Z"),
+        HorseForelock = G("M-3.8,-4.2 Q-1.4,-7.8 1.8,-5.6 Q3,-3.8 1.6,-2.2 Q1,-3.8 -0.6,-3.4 Q-2.2,-2.4 -3.6,-2.6 Z"),
+        HorseTail = G("M0,0 C-3,-1 -6.5,1 -7,5 C-7.4,8.4 -5.4,11 -3,11.4 C-4,8.6 -3,6 -1.2,4.6 C-0.2,3.6 1,2 0,0 Z"),
+        HorseTailShine = G("M-1.6,1.4 C-3.8,2.2 -5,5 -4.6,8.4"),
         // clownfish: rounded head (+x) tapering to the tail root, black-trimmed fins
         FishBody = G("M9.6,0.4 C9.6,-4.4 5.4,-7 0,-7 C-5,-7 -8.6,-3.6 -10,0 C-8.6,3.6 -5,6.6 0,6.6 C5.4,6.6 9.6,4.6 9.6,0.4 Z"),
         FishTail = G("M0,0 C-2,-3 -5,-6.5 -7.5,-6 C-8.6,-3 -8.6,3 -7.5,6 C-5,6.5 -2,3 0,0 Z"),
@@ -451,8 +450,8 @@ public sealed class PetControl : FrameworkElement
         FishFin = G("M0,0 Q-1.5,3.5 -4.5,3.2 Q-3,1 0,0 Z");
 
     string _kind = "";
-    Brush _fill = Ink, _shade = Ink, _accent = Ink, _cream = Ink;
-    Pen _limb = Thin, _farLimb = Thin, _limbThick = Thin, _farThick = Thin, _thickEdge = Thin, _tailPen = Thin, _neck = Thin, _accentPen = Thin, _edge = Thin, _limbEdge = Thin, _tailEdge = Thin, _neckEdge = Thin;
+    Brush _fill = Ink, _shade = Ink, _accent = Ink, _cream = Ink, _muzzle = Ink;
+    Pen _limb = Thin, _farLimb = Thin, _maneEdge = Thin, _tailPen = Thin, _neck = Thin, _accentPen = Thin, _edge = Thin, _edge2 = Thin, _limbEdge = Thin, _tailEdge = Thin, _neckEdge = Thin;
     public string Kind
     {
         get => _kind;
@@ -466,7 +465,12 @@ public sealed class PetControl : FrameworkElement
                 case "Dog": Palette(34, 30, 0xF8D6A4, 0xDDA25F, 0xB0763A, 0x7E5228, 0x9C6430, 0xFFF4E4, 2.3); break;
                 case "Bunny": Palette(34, 30, 0xFFFFFF, 0xF3F3F7, 0xC9C9D6, 0x9898A8, 0xFFB3C1, 0xFFFFFF, 2.4); break;
                 case "Ghost": Palette(34, 30, 0xFFFFFF, 0xEEF1FF, 0xBFC8F0, 0x97A2D8, 0xB7B7E0, 0xFFFFFF, 2.2, 0.9); break;
-                case "Horse": Palette(42, 36, 0xCB8C57, 0xA0602F, 0x6B3B1A, 0x47260F, 0x2E1B10, 0xFFF8F0, 2.2); _accent = Radial(0.32, 0.25, 0.62, (0x6A452C, 1, 0), (0x2E1B10, 1, 1)); break;
+                case "Horse":   // flaxen chestnut: warm coat, blonde mane and tail
+                    Palette(40, 36, 0xF2B97F, 0xCD8247, 0x9A582A, 0x6A3A1A, 0xF0D49A, 0xFBE6CC, 3.2);
+                    _accent = Radial(0.32, 0.25, 0.62, (0xFFF6DE, 1, 0), (0xF0D49A, 1, 0.55), (0xC9A465, 1, 1));
+                    _muzzle = Radial(0.35, 0.3, 0.65, (0xFFF2E2, 1, 0), (0xF3CDA4, 1, 0.6), (0xD9A272, 1, 1));
+                    _maneEdge = P(Ui.Brush(C(0xA9844A), 0.9), 0.8);
+                    break;
                 case "Fish": Palette(32, 26, 0xFFC27E, 0xFF8A2A, 0xDE5E08, 0xA8460A, 0xFFFFFF, 0xFFFFFF, 2.2); break;
                 default: Palette(34, 30, 0xFFD6AC, 0xF4A261, 0xD47A3A, 0x9A5527, 0xC9682A, 0xFFF1E0, 2.3); break;
             }
@@ -483,9 +487,8 @@ public sealed class PetControl : FrameworkElement
         _accent = Ui.Brush(C(accent));
         _cream = Ui.Brush(C(cream), alpha);
         var bodyB = Ui.Brush(C(body), alpha); var darkB = Ui.Brush(C(dark), alpha); var edgeB = Ui.Brush(C(edge), 0.8 * alpha);
-        _edge = P(edgeB, 0.9);
+        _edge = P(edgeB, 0.9); _edge2 = P(edgeB, 1.8);
         _limb = P(bodyB, limb); _farLimb = P(darkB, limb); _limbEdge = P(edgeB, limb + 1.4);
-        _limbThick = P(bodyB, limb + 1.4); _farThick = P(darkB, limb + 1.4); _thickEdge = P(edgeB, limb + 2.8);
         _tailPen = P(bodyB, 2.8); _tailEdge = P(edgeB, 4.2);
         _neck = P(bodyB, 5.8); _neckEdge = P(edgeB, 7.2);
         _accentPen = P(Ui.Brush(C(accent), 0.75), 1.2);
@@ -758,67 +761,85 @@ public sealed class PetControl : FrameworkElement
         dc.Pop();
     }
 
-    /// Horse: jointed legs that trot, a flowing tail, a maned neck that arches up or drops to graze ("sitting").
+    /// Horse, drawn as a chibi pony to match the other pets: big round head with a soft muzzle, fluffy flaxen
+    /// mane and tail, short sturdy legs that trot; "sitting" lowers the head to graze.
+    /// Parts that join (neck+body, head+muzzle) draw all their edges first and fills second, so they merge into one
+    /// outlined silhouette without seams. Re-pushing a slot is fine here because its matrix is unchanged.
     void DrawHorse(DrawingContext dc, double w, double ground)
     {
-        const double rx = 12.5, ry = 6.4, leg = 12;
+        const double leg = 8.5, rx = 9.8, ry = 6.4;
         double stride = Stride, breathe = 1 + Math.Sin(_clock * (_lie > 0.5 ? 1.6 : 2.2)) * (0.02 + 0.03 * _lie);
-        var c = new Point(w * 0.42, Lerp(ground - leg - ry * 0.5, ground - ry * 0.9, _lie) - Math.Abs(Math.Sin(_gait)) * 1.4 * stride);
+        var c = new Point(w * 0.42, Lerp(ground - leg - 2.6, ground - 5.8, _lie) - Math.Abs(Math.Sin(_gait)) * 1.3 * stride);
 
         // far legs, then the tail, then near legs, so the near hind leg sits in front of the tail
         for (int i = 0; i < 4; i++)
         {
             if (i == 2)
             {
-                Push(dc, 1, c.X - rx * 0.9, c.Y - ry * 0.55, Math.Sin(_clock * 1.7) * 9 + stride * 30 + Math.Sin(_gait) * 6 * stride + _lie * 45);
-                dc.DrawGeometry(_accent, _edge, HorseTail);
+                Push(dc, 1, c.X - 8.6, c.Y - 3, Math.Sin(_clock * 1.7) * 8 + stride * 28 + Math.Sin(_gait) * 6 * stride + _lie * 40);
+                dc.DrawGeometry(_accent, _maneEdge, HorseTail);
+                dc.DrawGeometry(null, ManeShine, HorseTailShine);
                 dc.Pop();
             }
             bool front = (i & 1) == 1, near = i >= 2;
             double ph = front ^ near ? 0 : Math.PI;
-            var hip = new Point(c.X + (front ? rx * 0.62 : -rx * 0.6) + (near ? 1.4 : -1.4), c.Y + ry * 0.35);
+            var hip = new Point(c.X + (front ? 5.4 : -5.4) + (near ? 1.3 : -1.3), c.Y + 2.6);
             double s = Math.Sin(_gait + ph), up = Math.Max(0, Math.Cos(_gait + ph));
-            double fx = Lerp(hip.X + s * 4.2 * stride, hip.X + (front ? 6 : 4), _lie);
-            double fy = Lerp(ground - up * 3.4 * stride, ground - 1, _lie);
+            double fx = Lerp(hip.X + s * 3.4 * stride, hip.X + (front ? 5 : 3), _lie);
+            double fy = Lerp(ground - 1 - up * 2.8 * stride, ground - 1, _lie);
             // knees bend forward on the front legs, hocks backward on the hind ones
-            double bend = Lerp((front ? 1 : -1) * (1.2 + up * 2.4 * stride), front ? -2.5 : 2.5, _lie);
-            var foot = new Point(fx, fy - 1);
+            double bend = Lerp((front ? 1 : -1) * up * 1.8 * stride, front ? -2 : 2, _lie);
             var knee = new Point((hip.X + fx) / 2 + bend, (hip.Y + fy) / 2);
-            dc.DrawLine(_thickEdge, hip, knee); dc.DrawLine(_limbEdge, knee, foot);
-            dc.DrawLine(near ? _limbThick : _farThick, hip, knee); dc.DrawLine(near ? _limb : _farLimb, knee, foot);
-            dc.DrawEllipse(Hoof, null, new Point(fx, fy - 0.8), 1.7, 1.2);
+            var foot = new Point(fx, fy - 1.2);
+            dc.DrawLine(_limbEdge, hip, knee); dc.DrawLine(_limbEdge, knee, foot);
+            var pen = near ? _limb : _farLimb;
+            dc.DrawLine(pen, hip, knee); dc.DrawLine(pen, knee, foot);
+            dc.DrawRoundedRectangle(Hoof, null, new Rect(fx - 2, fy - 2.4, 4, 2.6), 1, 1);
         }
 
-        // neck swings from raised (standing) to down in the grass (grazing); the head munches while it grazes
-        var nb = new Point(c.X + rx * 0.6, c.Y - ry * 0.45);
-        double munch = Math.Sin(_clock * 7) * 3 * _graze;
-        double na = Lerp(Lerp(-58, 50, _graze), -32, _lie) + Math.Sin(_gait * 2) * 4 * stride + (_love > 0 ? Math.Sin(_love * 10) * 6 : 0);
+        // thick neck with a puffy mane along its crest; swings up (standing) or down to the grass (grazing)
+        var nb = new Point(c.X + 5.6, c.Y - 3);
+        double na = Lerp(Lerp(-60, 40, _graze), -36, _lie) + Math.Sin(_gait * 2) * 4 * stride + (_love > 0 ? Math.Sin(_love * 10) * 6 : 0);
         double nr = na * Math.PI / 180;
-        var nt = new Point(nb.X + Math.Cos(nr) * 11, nb.Y + Math.Sin(nr) * 11);
+        var nt = new Point(nb.X + Math.Cos(nr) * 8, nb.Y + Math.Sin(nr) * 8);
+        double bounce = Math.Sin(_gait * 2) * 0.6 * stride;
         Push(dc, 5, nb.X, nb.Y, na);
-        dc.DrawGeometry(_fill, _edge, HorseNeck);
-        dc.DrawGeometry(_accent, null, HorseMane);
+        dc.DrawGeometry(null, _edge2, HorseNeck);
         dc.Pop();
-
         Push(dc, 2, c.X, c.Y, 0, 1, breathe);
-        dc.DrawGeometry(_fill, _edge, HorseBody);
+        dc.DrawEllipse(null, _edge2, new Point(0, 0), rx, ry);
+        dc.Pop();
+        Push(dc, 5, nb.X, nb.Y, na);
+        dc.DrawGeometry(_fill, null, HorseNeck);
+        dc.Pop();
+        Push(dc, 2, c.X, c.Y, 0, 1, breathe);
+        dc.DrawEllipse(_fill, null, new Point(0, 0), rx, ry);
+        dc.Pop();
+        // mane sits on top of the crest, root to poll, so it reads as a fluffy fringe
+        Push(dc, 5, nb.X, nb.Y, na);
+        dc.DrawEllipse(_accent, _maneEdge, new Point(0.4, -4.6 - bounce), 2.9, 2.7);
+        dc.DrawEllipse(_accent, _maneEdge, new Point(3.4, -4.8 + bounce), 2.9, 2.7);
+        dc.DrawEllipse(_accent, _maneEdge, new Point(6.3, -4.4 - bounce), 2.7, 2.6);
+        dc.DrawEllipse(_accent, _maneEdge, new Point(8.8, -3.8 + bounce), 2.3, 2.3);
         dc.Pop();
 
-        double ha = 22 + _graze * 48 + _lie * 10 + munch, hr = ha * Math.PI / 180;
-        Push(dc, 3, nt.X + Math.Cos(hr) * 3, nt.Y + Math.Sin(hr) * 3, ha);
-        PushRotate(dc, 4, _twitch > 0 ? Math.Sin(_twitch * 50) * 10 : 0, -2.6, -3);
+        double ha = Lerp(Lerp(0, 50, _graze), 10, _lie) + Math.Sin(_clock * 7) * 3 * _graze;
+        Push(dc, 3, nt.X + 1, nt.Y - 1.6, ha);
+        PushRotate(dc, 4, _twitch > 0 ? Math.Sin(_twitch * 50) * 10 : 0, -1.5, -4.5);
         dc.DrawGeometry(_shade, _edge, HorseEarFar);
         dc.DrawGeometry(_fill, _edge, HorseEar);
+        dc.DrawGeometry(Pink, null, HorseEarIn);
         dc.Pop();
-        dc.DrawGeometry(_fill, _edge, HorseHead);
-        dc.PushClip(HorseHead);
-        dc.DrawEllipse(_shade, null, new Point(6.2, 1), 2.9, 3.4);   // darker muzzle
-        dc.Pop();
-        dc.DrawGeometry(_cream, null, HorseBlaze);
-        dc.DrawEllipse(Hoof, null, new Point(6.3, 0.5), 0.7, 0.55);   // nostril
-        dc.DrawGeometry(_accent, null, HorseForelock);
-        Cheeks(dc, 1, double.NaN, 1.8, 1.6);
-        Eye(dc, -1.5, -0.8, 1.4);
+        dc.DrawEllipse(null, _edge2, new Point(0, 0), 6.2, 5.7);
+        dc.DrawEllipse(null, _edge2, new Point(4.6, 2.7), 4.1, 3.3);
+        dc.DrawEllipse(_fill, null, new Point(0, 0), 6.2, 5.7);
+        dc.DrawEllipse(_muzzle, null, new Point(4.6, 2.7), 4.1, 3.3);
+        dc.DrawEllipse(Hoof, null, new Point(7.2, 2), 0.55, 0.75);   // nostril
+        dc.DrawLine(MouthPen, new Point(6, 4.6), new Point(7.1, 4.2));   // little smile
+        dc.DrawGeometry(_accent, _maneEdge, HorseForelock);
+        Cheeks(dc, -2.8, double.NaN, 2.4, 1.7);
+        Eye(dc, -1.4, -0.8, 1.5);
+        Eye(dc, 2.6, -1.2, 1.5);
         dc.Pop();
     }
 
