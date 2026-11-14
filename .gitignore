@@ -4,3 +4,5 @@ publish/Isle.exe
 bin/Release/net8.0-windows10.0.19041.0/win-x64/
 # 9 MB intermediate host for the self-contained single file
 obj/**/singlefilehost.exe
+# local copy of the self-contained exe, too big for GitHub
+publish/updated/

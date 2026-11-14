@@ -2661,7 +2661,12 @@ public partial class MainWindow : Window
         _scoreListFetching = false;
         if (sport != S.ScoresSport) { _ = LoadScores(); return; } // another chip was picked meanwhile
         _scoreListFailed = list == null;
-        if (list != null) _scoreList = list;
+        if (list != null)
+        {
+            _scoreList = list;
+            var pinned = list.Find(x => x.Id == S.PinnedMatchId);
+            if (pinned != null) UpdatePinnedFixture(pinned);
+        }
         if (_page == Page.Scores) BuildScores();
     }
 
@@ -2834,19 +2839,28 @@ public partial class MainWindow : Window
         _pinnedFetching = true;
         _pinnedAt = DateTime.Now;
         string id = S.PinnedMatchId;
+        var previous = _pinned;
         var list = await Scores.GetAsync(S.PinnedMatchQuery);
         _pinnedFetching = false;
         if (list == null || id != S.PinnedMatchId) return; // offline (keep the last score) or re-pinned meanwhile
+        if (!ReferenceEquals(previous, _pinned)) return; // the Scores page received a newer snapshot while this request was pending
         var m = list.Find(x => x.Id == id);
         if (m == null) { UnpinMatch(); return; } // the feed has dropped it: long finished
+        UpdatePinnedFixture(m);
+        if (_state == IslandState.Expanded && _page == Page.Scores) BuildScores();
+    }
+
+    // Both fetch paths update the same snapshot so the capsule and the cached page stay in sync.
+    void UpdatePinnedFixture(Fixture m)
+    {
         var old = _pinned;
         _pinned = m;
         if (m.State == "post" && old?.State != "post") _pinnedEndedAt = DateTime.Now;
         if (old != null) ScoreAlert(old, m);
-        if (_state == IslandState.Expanded && _page == Page.Scores && _scoreList != null)
+        if (_scoreList != null)
         {
-            int i = _scoreList.FindIndex(x => x.Id == id);
-            if (i >= 0) { _scoreList[i] = m; BuildScores(); }
+            int i = _scoreList.FindIndex(x => x.Id == m.Id);
+            if (i >= 0) _scoreList[i] = m;
         }
     }
 

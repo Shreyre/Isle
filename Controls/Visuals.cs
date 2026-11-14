@@ -635,7 +635,8 @@ public sealed class BatteryGlyph : FrameworkElement
         dc.DrawRoundedRectangle(Ui.Brush(fill), null, new Rect(2, 2, fw, h - 4), 2, 2);
         if (Charging)
         {
-            var g = Geometry.Parse("M 14,1 L 8,7 L 12,7 L 10,12 L 17,5.5 L 13,5.5 Z");
+            // Parsed geometries are frozen; clone before applying the size-dependent transform.
+            var g = Geometry.Parse("M 14,1 L 8,7 L 12,7 L 10,12 L 17,5.5 L 13,5.5 Z").Clone();
             g.Transform = new ScaleTransform(w / 26, h / 13);
             dc.DrawGeometry(Brushes.White, new Pen(Brushes.Black, 0.8), g);
         }
